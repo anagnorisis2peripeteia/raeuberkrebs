@@ -19,7 +19,8 @@ export type AttackClass =
   | "path-traversal" // untrusted input reaches a filesystem path (../ escape)
   | "unsafe-deserialization" // untrusted bytes into pickle/yaml.load/native deserialize
   | "ssrf" // untrusted input controls an outbound request target
-  | "unsafe-exec"; // untrusted input into eval / new Function / dynamic import
+  | "unsafe-exec" // untrusted input into eval / new Function / dynamic import
+  | "csv-injection"; // untrusted input reaches a CSV/spreadsheet cell without formula-prefix neutralization
 
 export const ATTACK_CLASSES: AttackClass[] = [
   "command-injection",
@@ -28,6 +29,7 @@ export const ATTACK_CLASSES: AttackClass[] = [
   "unsafe-deserialization",
   "ssrf",
   "unsafe-exec",
+  "csv-injection",
 ];
 
 /** Terminal verdicts, most-benign first. Only `clean` exits 0. */
@@ -47,7 +49,16 @@ export const VERDICT_EXIT: Record<Verdict, number> = {
 };
 
 /** Where a fired exploit's proof came from — always dynamic here; static is only a lead. */
-export type ExploitProof = "marker-executed" | "secret-exfiltrated" | "crash" | "oob-request";
+export type ExploitProof =
+  | "marker-executed"
+  | "secret-exfiltrated"
+  | "crash"
+  | "oob-request"
+  // A benign formula-marker (`=RAEUBER_…`) reached the produced CSV/output as a cell that STILL begins
+  // with a formula trigger (= + - @) — un-neutralized, so it would execute in a spreadsheet. The
+  // payload never runs in OUR sandbox (it fires in the victim's Excel/Sheets), so the proof is that it
+  // SURVIVED into the output unescaped, not that it executed.
+  | "formula-unescaped";
 
 /**
  * A PROVEN exploit: an adversarial payload that was executed against the changed surface in the

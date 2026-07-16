@@ -4,6 +4,7 @@ import type { Attacker } from "./attackers/attacker.js";
 import { CommandInjectionAttacker } from "./attackers/command-injection.js";
 import { PathTraversalAttacker } from "./attackers/path-traversal.js";
 import { SsrfAttacker } from "./attackers/ssrf.js";
+import { CsvInjectionAttacker } from "./attackers/csv-injection.js";
 import type { Exploit, LaneStatus, RaeuberResult, Verdict } from "./types.js";
 
 /** The registered attack lanes (Node). */
@@ -11,6 +12,7 @@ export const ATTACKERS: Attacker[] = [
   new CommandInjectionAttacker(),
   new PathTraversalAttacker(),
   new SsrfAttacker(),
+  new CsvInjectionAttacker(),
 ];
 
 function verdictFrom(lanes: LaneStatus[], exploits: Exploit[]): Verdict {

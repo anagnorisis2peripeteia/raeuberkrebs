@@ -243,3 +243,37 @@ describe("guard-coverage (#16 v1 — inter-procedural taint, first cut)", () => 
     }
   });
 });
+
+const CSV_FIXTURE = join(ROOT, "fixtures", "csv-injection-node");
+
+describe("raeuberkrebs csv-injection gate (models the openclaw google-meet finding)", () => {
+  it("fires on a CSV serialiser with no formula-prefix guard (formula-unescaped survives to output)", () => {
+    const r = runRedteam(CSV_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "csv-injection");
+    assert.ok(e, "expected a csv-injection exploit");
+    assert.equal(e.proof, "formula-unescaped");
+    assert.match(e.payload, /^=RAEUBER_/);
+  });
+
+  it("does NOT fire when formula prefixes are neutralised (leading ' prepended)", () => {
+    const dir = scratch({
+      "safe.js":
+        "function toCsv(rows){\n" +
+        "  return rows.map(function(r){ return r.map(function(v){\n" +
+        "    var t = v == null ? '' : String(v);\n" +
+        "    if (/^[=+@-]/.test(t)) t = \"'\" + t;\n" +
+        "    return t;\n" +
+        "  }).join(','); }).join('\\n');\n" +
+        "}\n" +
+        "module.exports.toCsv = toCsv;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["safe.js"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "csv-injection").length, 0, "a neutralised serialiser must not fire");
+      assert.ok(r.lanes.some((l) => l.attackClass === "csv-injection" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

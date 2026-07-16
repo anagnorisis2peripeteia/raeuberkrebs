@@ -13,6 +13,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SINK_RE =
   /\b(?:execSync|exec|execFileSync|execFile|spawnSync|spawn)\s*\(\s*(?:`[^`]*\$\{|['"][^'"]*['"]\s*\+|[A-Za-z_$][\w$]*\s*\+)/;
 
+// The bare `exec` alternative in SINK_RE also matches `db.exec(...)` (SQLite), `stmt.exec()`, and
+// `regex.exec()` — none of which are a shell. A command-injection sink is child_process, so require
+// the file to actually pull in child_process; a file that only does SQLite/regex `.exec()` never
+// imports it, so its leads drop out (issue #10). A false-positive `.exec()` couldn't fire the shell
+// marker anyway, but this keeps it out of the lead list and the density ranking.
+const CHILD_PROCESS_RE =
+  /(?:require\(\s*['"](?:node:)?child_process['"]|from\s+['"](?:node:)?child_process['"]|import\s+['"](?:node:)?child_process['"])/;
+
 // Benign proof-of-execution payloads: each injects `echo <marker>` via a different shell
 // metacharacter. Firing means the injected echo ran — the vuln is proven, nothing is harmed.
 function payloads(marker: string): string[] {
@@ -41,6 +49,7 @@ export class CommandInjectionAttacker implements Attacker {
   }
 
   staticLeads(source: string): StaticLead[] {
+    if (!CHILD_PROCESS_RE.test(source)) return []; // not a child_process file → the `.exec(` is not a shell
     return scanSinkLeads(source, SINK_RE);
   }
 
@@ -54,6 +63,7 @@ export class CommandInjectionAttacker implements Attacker {
       } catch {
         continue;
       }
+      if (!CHILD_PROCESS_RE.test(source)) continue; // not a child_process file — the `.exec(` is not a shell
       if (!SINK_RE.test(source)) continue; // no sink lead — nothing to drive
       const names = nodeExportedNames(source);
       if (names.length === 0) continue; // reachable sink but no exported entrypoint to drive

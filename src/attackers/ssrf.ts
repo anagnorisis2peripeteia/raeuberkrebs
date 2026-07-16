@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, NODE_RUN, NODE_SOURCE_RE, freshMarker, nodeExportedNames, scanSinkLeads } from "./attacker.js";
+import { type Attacker, type StaticLead, NODE_RUN, NODE_SOURCE_RE, freshMarker, nodeExportedNames } from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -12,6 +12,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // http(s). A lead, not a finding — whether the *host* is attacker-influenced is what the PoC decides.
 const SINK_RE =
   /\b(?:fetch|axios(?:\.(?:get|post|put|delete|patch|head|request))?|got(?:\.(?:get|post|put|delete|patch|head))?|undici\.(?:fetch|request)|https?\.(?:get|request))\s*\(\s*(?:`[^`]*\$\{|[A-Za-z_$][\w$.]*\s*[,)]|['"][^'"]*['"]\s*\+)/;
+
+// A lead whose URL begins with a FIXED `scheme://host[:port]/` literal — the host is hardcoded and
+// the variable is in the PATH (there is a `/` between the authority and the first interpolation). The
+// host can't be redirected except via the `@`/`//` userinfo trick (which the prove phase still tests),
+// so it ranks `low`. Everything else (a bare URL variable, `${x}` at the start, or a fixed host with
+// NO trailing slash before the variable — subdomain/userinfo-injectable) ranks `high` (issue #12).
+const AUTHORITY_FIXED_RE =
+  /(?:fetch|axios(?:\.[a-z]+)?|got(?:\.[a-z]+)?|undici\.[a-z]+|https?\.[a-z]+)\s*\(\s*[`'"]https?:\/\/[a-zA-Z0-9.\-]+(?::\d+)?\//i;
 
 function firstSinkLine(source: string): number {
   const lines = source.split("\n");
@@ -75,7 +83,18 @@ export class SsrfAttacker implements Attacker {
   }
 
   staticLeads(source: string): StaticLead[] {
-    return scanSinkLeads(source, SINK_RE);
+    const leads: StaticLead[] = [];
+    const lines = source.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(SINK_RE);
+      if (!m) continue;
+      leads.push({
+        line: i + 1,
+        sink: m[0].split("(")[0].trim(),
+        priority: AUTHORITY_FIXED_RE.test(lines[i]) ? "low" : "high",
+      });
+    }
+    return leads;
   }
 
   hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {

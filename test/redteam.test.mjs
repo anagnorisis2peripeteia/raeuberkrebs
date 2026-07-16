@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { runRedteam } from "../dist/runner.js";
+import { CommandInjectionAttacker } from "../dist/attackers/command-injection.js";
+import { SsrfAttacker } from "../dist/attackers/ssrf.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE = join(ROOT, "fixtures", "command-injection-node");
@@ -183,5 +185,25 @@ describe("raeuberkrebs TypeScript / ESM entrypoints", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("lead precision (#10 cmd-inj, #12 ssrf ranking)", () => {
+  it("#10: command-injection ignores db.exec/regex.exec with no child_process import", () => {
+    const ci = new CommandInjectionAttacker();
+    const sqlite = 'const db = require("better-sqlite3")(":memory:");\nfunction q(n){ return db.exec(`SELECT ${n}`); }\n';
+    assert.equal(ci.staticLeads(sqlite).length, 0, "db.exec w/o child_process must not be a cmd-inj lead");
+    const real = 'const { execSync } = require("child_process");\nfunction r(h){ return execSync("ls " + h); }\n';
+    assert.ok(ci.staticLeads(real).length >= 1, "real child_process exec must still be a lead");
+  });
+
+  it("#12: ssrf ranks host-variable high, fixed-host + path-only low", () => {
+    const ssrf = new SsrfAttacker();
+    const hostVar = ssrf.staticLeads("export const a = (u) => fetch(u);\nexport const b = (h) => fetch(`${h}/api`);");
+    assert.ok(hostVar.length >= 2 && hostVar.every((l) => l.priority === "high"), "bare var + ${host}/api are host-variable");
+    const pathOnly = ssrf.staticLeads("export const c = (p) => fetch(`https://api.github.com/repos/${p}`);");
+    assert.equal(pathOnly[0].priority, "low", "fixed host + /path is path-only");
+    const noSlash = ssrf.staticLeads("export const d = (p) => fetch(`https://api.github.com${p}`);");
+    assert.equal(noSlash[0].priority, "high", "fixed host with NO slash before the var is subdomain/userinfo-injectable");
   });
 });

@@ -20,6 +20,8 @@ export interface SweepLead {
   line: number;
   lane: AttackClass;
   sink: string;
+  /** Lane triage rank (SSRF sets it; `low` = fixed-host/path-only, rarely SSRF). See StaticLead. */
+  priority?: "high" | "low";
 }
 
 export interface SweepReport {
@@ -84,8 +86,10 @@ export function sweepRepo(repo: string, opts: { top?: number } = {}): SweepRepor
     }
     for (const attacker of ATTACKERS) {
       for (const lead of attacker.staticLeads(src)) {
-        leads.push({ file: rel, line: lead.line, lane: attacker.attackClass, sink: lead.sink });
-        perFile.set(rel, (perFile.get(rel) ?? 0) + 1);
+        leads.push({ file: rel, line: lead.line, lane: attacker.attackClass, sink: lead.sink, priority: lead.priority });
+        // Rank the density head by ACTIONABLE leads: a `low`-priority lead (fixed-host SSRF) doesn't
+        // count toward where to point the expensive prove phase.
+        if (lead.priority !== "low") perFile.set(rel, (perFile.get(rel) ?? 0) + 1);
       }
     }
   }

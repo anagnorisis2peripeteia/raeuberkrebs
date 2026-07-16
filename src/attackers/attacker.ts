@@ -17,6 +17,10 @@ import type { Sandbox } from "../sandbox.js";
 export interface StaticLead {
   line: number;
   sink: string;
+  /** Optional lane-specific triage rank. SSRF sets it: `high` = the URL *authority* (host) is
+   *  variable/untrusted-shaped (worth reach-the-sink); `low` = a fixed `scheme://host/` prefix with
+   *  only the path variable (userinfo-trick-only, rarely SSRF). Other lanes leave it undefined. */
+  priority?: "high" | "low";
 }
 
 export interface Attacker {

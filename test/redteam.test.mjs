@@ -8,6 +8,7 @@ import { dirname, resolve } from "node:path";
 import { runRedteam } from "../dist/runner.js";
 import { CommandInjectionAttacker } from "../dist/attackers/command-injection.js";
 import { SsrfAttacker } from "../dist/attackers/ssrf.js";
+import { sweepRepo } from "../dist/sweep.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE = join(ROOT, "fixtures", "command-injection-node");
@@ -217,5 +218,28 @@ describe("lead precision (#10 cmd-inj, #12 ssrf ranking)", () => {
     assert.equal(directEnv[0].priority, "low", "direct process.env read is config");
     const param = ssrf.staticLeads("export function f(url){ return fetch(url); }");
     assert.equal(param[0].priority, "high", "fn-parameter URL stays untrusted");
+  });
+});
+
+describe("guard-coverage (#16 v1 — inter-procedural taint, first cut)", () => {
+  it("flags a high-priority sink whose file lacks the project's own guard as a guard-gap", () => {
+    const dir = scratchModule({
+      "guarded.ts":
+        'import { ssrfPolicy } from "./ssrf.js";\n' +
+        "export const a = (url: string) => { ssrfPolicy(url); return fetch(url); };\n",
+      "unguarded.ts": "export const b = (url: string) => fetch(url);\n",
+      "ssrf.ts": 'export function ssrfPolicy(u: string){ if (!u) throw new Error("blocked"); }\n',
+    });
+    try {
+      const r = sweepRepo(dir, { top: 10 });
+      const gapFiles = r.guardGaps.filter((g) => g.lane === "ssrf").map((g) => g.file);
+      assert.ok(gapFiles.includes("unguarded.ts"), "unguarded fetch should be a guard-gap");
+      assert.ok(!gapFiles.includes("guarded.ts"), "fetch in a file referencing the ssrf guard is covered");
+      // the covered lead still exists, just not flagged as a gap
+      const guardedLead = r.leads.find((l) => l.file === "guarded.ts" && l.lane === "ssrf");
+      assert.equal(guardedLead?.guardCovered, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

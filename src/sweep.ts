@@ -13,7 +13,16 @@ import type { AttackClass } from "./types.js";
 const SOURCE_EXTS = ["ts", "mts", "cts", "js", "cjs", "mjs"];
 // Exclude tests/fixtures/build output/vendored code — same spirit as the gate's scope.
 const SKIP_RE =
-  /(\.test\.|\.spec\.|(^|\/)tests?\/|(^|\/)__tests__\/|(^|\/)fixtures?\/|(^|\/)dist\/|(^|\/)build\/|(^|\/)node_modules\/|(^|\/)\.git\/|\.d\.ts$)/;
+  /(\.test\.|\.spec\.|-harness\.|(^|\/)test-support\/|(^|\/)tests?\/|(^|\/)__tests__\/|(^|\/)e2e\/|(^|\/)fixtures?\/|(^|\/)scripts?\/|(^|\/)dist\/|(^|\/)build\/|(^|\/)node_modules\/|(^|\/)\.git\/|(^|\/)\.agents\/|\.d\.ts$)/;
+
+// #16 guard-coverage (v1 of inter-procedural taint): what the PROJECT'S OWN sanitizer for a sink
+// family looks like. A well-engineered project applies these widely (openclaw references an ssrf
+// guard in 155 files); the bug is the sink site whose file doesn't reference one. Per-file heuristic
+// — coarse (a guard reached via a cross-file wrapper is missed); full inter-procedural taint is #16.
+const SANITIZER_SIGNALS: Partial<Record<AttackClass, RegExp>> = {
+  ssrf: /\bssrf\b|ssrfPolicy|ssrfGuard|isPrivate(?:Host|Ip|Address)|blocked?Hosts?|denyHost|allow-?list|allowedHosts?|assertPublic|safeFetch|guardedFetch|validateUrl|isAllowedUrl|resolvePublicUrl/i,
+  "path-traversal": /isPathInside|sanitize(?:Path|Filename)|assertWithin|containsTraversal|resolveWithin|safeJoin|isSubPath/i,
+};
 
 export interface SweepLead {
   file: string;
@@ -22,6 +31,11 @@ export interface SweepLead {
   sink: string;
   /** Lane triage rank (SSRF sets it; `low` = fixed-host/path-only, rarely SSRF). See StaticLead. */
   priority?: "high" | "low";
+  /** #16 guard-coverage: does this lead's FILE reference the project's OWN sanitizer for this sink
+   *  family? `false` = the sink is here but the guard the project uses elsewhere is NOT referenced in
+   *  this file — a guard-consistency gap, the sharpest reach-the-sink target. `undefined` = no guard
+   *  signal is known for this lane. */
+  guardCovered?: boolean;
 }
 
 export interface SweepReport {
@@ -30,6 +44,10 @@ export interface SweepReport {
   leads: SweepLead[];
   /** Files with the most sink leads — where to point the LLM hunt / prove phase. */
   densityRanked: { file: string; leads: number }[];
+  /** #16 v1: actionable leads whose file does NOT reference the project's own guard for that sink —
+   *  where a project that guards this class elsewhere most likely missed a path. Full inter-procedural
+   *  taint is the aspiration; this per-file signal is the tractable first cut. */
+  guardGaps: SweepLead[];
 }
 
 /** Prefer `git ls-files` (respects .gitignore, fast); fall back to a bounded fs walk for a
@@ -84,9 +102,22 @@ export function sweepRepo(repo: string, opts: { top?: number } = {}): SweepRepor
     } catch {
       continue;
     }
+    // #16: which sink families does THIS file guard against (references the project's own sanitizer)?
+    const guarded = new Set<AttackClass>();
+    for (const lane of Object.keys(SANITIZER_SIGNALS) as AttackClass[]) {
+      if (SANITIZER_SIGNALS[lane]!.test(src)) guarded.add(lane);
+    }
     for (const attacker of ATTACKERS) {
+      const hasSignal = Boolean(SANITIZER_SIGNALS[attacker.attackClass]);
       for (const lead of attacker.staticLeads(src)) {
-        leads.push({ file: rel, line: lead.line, lane: attacker.attackClass, sink: lead.sink, priority: lead.priority });
+        leads.push({
+          file: rel,
+          line: lead.line,
+          lane: attacker.attackClass,
+          sink: lead.sink,
+          priority: lead.priority,
+          guardCovered: hasSignal ? guarded.has(attacker.attackClass) : undefined,
+        });
         // Rank the density head by ACTIONABLE leads: a `low`-priority lead (fixed-host SSRF) doesn't
         // count toward where to point the expensive prove phase.
         if (lead.priority !== "low") perFile.set(rel, (perFile.get(rel) ?? 0) + 1);
@@ -99,5 +130,9 @@ export function sweepRepo(repo: string, opts: { top?: number } = {}): SweepRepor
     .sort((a, b) => b.leads - a.leads)
     .slice(0, top);
 
-  return { repo, filesScanned: files.length, leads, densityRanked };
+  // #16 v1: the sharpest targets — actionable leads whose file doesn't reference the project's own
+  // guard for that sink family (the class a well-engineered project ships: guarded everywhere but here).
+  const guardGaps = leads.filter((l) => l.priority !== "low" && l.guardCovered === false);
+
+  return { repo, filesScanned: files.length, leads, densityRanked, guardGaps };
 }

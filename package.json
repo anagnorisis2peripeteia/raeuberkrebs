@@ -12,7 +12,8 @@
     "test": "node scripts/run-tests.mjs",
     "lint": "node scripts/lint.mjs",
     "validate:attacker": "node scripts/validate-attacker.mjs",
-    "validate:attackers": "node scripts/validate-attacker.mjs --all"
+    "validate:attackers": "node scripts/validate-attacker.mjs --all",
+    "verify:crabbox": "node scripts/verify-crabbox.mjs"
   },
   "engines": {
     "node": ">=20"

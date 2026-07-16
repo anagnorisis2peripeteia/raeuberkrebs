@@ -1,0 +1,24 @@
+{
+  "name": "raeuberkrebs",
+  "version": "0.1.0",
+  "description": "Räuberkrebs — PR-scoped code-security red-team gate: attacks the entrypoints a PR touched with adversarial payloads, EXECUTES them in a crabbox sandbox, and fails closed on any payload that actually fires (a reproducible PoC). Evidence or it didn't count.",
+  "type": "module",
+  "bin": {
+    "raeuberkrebs": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "test": "node scripts/run-tests.mjs",
+    "lint": "node scripts/lint.mjs",
+    "validate:attacker": "node scripts/validate-attacker.mjs",
+    "validate:attackers": "node scripts/validate-attacker.mjs --all"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.0"
+  }
+}

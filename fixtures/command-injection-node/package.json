@@ -1,0 +1,7 @@
+{
+  "name": "raeuber-fixture-command-injection-node",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Planted command-injection fixture for the raeuberkrebs Node lane canary. The vulnerability is intentional.",
+  "type": "commonjs"
+}

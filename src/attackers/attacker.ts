@@ -22,10 +22,49 @@ export interface Attacker {
 }
 
 /**
- * A per-run, unguessable marker. A payload injects `echo <marker>`; observing `<marker>` back in
- * the sandbox output is proof the injection path executed — it cannot occur by coincidence, and a
- * fixed string could be spoofed by unrelated code, so it must be random per run.
+ * A per-run, unguessable marker. A payload injects `echo <marker>` (or reads a decoy whose content
+ * is `<marker>`); observing `<marker>` back in the sandbox output is proof the sink executed — it
+ * cannot occur by coincidence, and a fixed string could be spoofed by unrelated code, so it must be
+ * random per run.
  */
 export function freshMarker(): string {
   return "RAEUBER_" + randomBytes(9).toString("hex");
+}
+
+/**
+ * A CommonJS driver that requires `moduleRel` and calls `fnName(arg)` — the first parameter, the
+ * canonical injectable position — then prints anything the call returns or an error carries, so
+ * output produced by the exercised sink (an echoed marker, a traversed file's contents) is
+ * observable. Shared by the Node lanes. CommonJS require runs without a build step (Chunk 0 targets
+ * .js/.cjs; .mjs/.ts transpile is a later refinement).
+ */
+export function nodeRequireDriver(moduleRel: string, fnName: string, arg: string): string {
+  const a = JSON.stringify(arg);
+  const mod = JSON.stringify("./" + moduleRel);
+  const fn = JSON.stringify(fnName);
+  return `
+(async () => {
+  let m; try { m = require(${mod}); } catch (e) { process.stdout.write("REQUIRE_FAIL:" + e); return; }
+  const fn = (m && m[${fn}]) || (m && m.default && m.default[${fn}]) || (m && m.default);
+  if (typeof fn !== "function") { process.stdout.write("NOT_A_FUNCTION"); return; }
+  try {
+    const r = await fn(${a});
+    process.stdout.write(String(r && r.stdout ? r.stdout : (r == null ? "" : r)));
+  } catch (e) {
+    process.stdout.write(String((e && e.stdout) || (e && e.message) || e || ""));
+  }
+})();
+`.trim();
+}
+
+/** Exported symbol names in Node source we can try to drive. */
+export function nodeExportedNames(source: string): string[] {
+  const re =
+    /export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)|(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=|export\s+const\s+([A-Za-z_$][\w$]*)\s*=/g;
+  const names = new Set<string>();
+  for (const m of source.matchAll(re)) {
+    const name = m[1] || m[2] || m[3];
+    if (name) names.add(name);
+  }
+  return [...names];
 }

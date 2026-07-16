@@ -69,3 +69,38 @@ describe("raeuberkrebs command-injection gate", () => {
     }
   });
 });
+
+const PT_FIXTURE = join(ROOT, "fixtures", "path-traversal-node");
+
+describe("raeuberkrebs path-traversal gate", () => {
+  it("fires on the planted fixture — reads a decoy secret via ../ (secret-exfiltrated)", () => {
+    const r = runRedteam(PT_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "path-traversal");
+    assert.ok(e, "expected a path-traversal exploit");
+    assert.equal(e.proof, "secret-exfiltrated");
+    assert.ok(e.payload.includes("../"));
+    assert.match(e.evidence, /RAEUBER_[0-9a-f]+_TRAVERSAL_SECRET/);
+  });
+
+  it("does NOT fire when the read is containment-guarded (dynamic attack blocked)", () => {
+    const dir = scratch({
+      "guarded.js":
+        'const fs = require("fs");\nconst path = require("path");\n' +
+        "function read(name){\n" +
+        '  const base = path.join(__dirname, "public");\n' +
+        "  const full = path.resolve(base, name);\n" +
+        '  if (!full.startsWith(base + path.sep)) throw new Error("denied");\n' +
+        "  return fs.readFileSync(full).toString();\n" +
+        "}\nmodule.exports.read = read;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["guarded.js"], LOCAL);
+      assert.equal(r.exploits.length, 0, "containment guard must defeat the ../ attack");
+      assert.notEqual(r.verdict, "vulnerable");
+      assert.ok(r.lanes.some((l) => l.attackClass === "path-traversal" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

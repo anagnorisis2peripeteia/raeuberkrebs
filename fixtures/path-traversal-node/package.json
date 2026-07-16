@@ -1,0 +1,1 @@
+{ "name": "raeuber-fixture-path-traversal-node", "version": "0.0.0", "private": true, "type": "commonjs", "description": "Planted path-traversal fixture; the vulnerability is intentional." }

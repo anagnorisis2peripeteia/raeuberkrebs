@@ -1,0 +1,44 @@
+# raeuberkrebs taint bridge — SSRF (#16).
+#
+# The lead-FINDER half of the re-scoped #16: an existing taint engine (semgrep) traces an untrusted
+# SOURCE to a fetch SINK and reports only flows that do NOT pass a sanitizer on the path — the
+# guard-CONSISTENCY signal a per-file heuristic can't produce. raeuberkrebs then PROVES each reported
+# flow by firing a benign PoC in the sandbox (the tool's actual differentiator: evidence, not a static
+# maybe). Validated: this rule flags an unguarded `fetch(req.body.url)` but clears one where
+# `ssrfPolicy(...)` sanitizes on the path.
+#
+# LIMITS: OSS semgrep taint is intra-file/intra-function; a guard applied in UPSTREAM middleware
+# (true cross-file inter-procedural) needs `semgrep --pro` (login) or CodeQL. TUNE `pattern-sources`
+# to the target's real untrusted inputs (HTTP body vs chat message vs tool arg) — the defaults below
+# are a starting set.
+rules:
+  - id: raeuber-ssrf-untrusted-fetch
+    mode: taint
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: >-
+      Untrusted input reaches an outbound request (fetch/axios/got) without passing an SSRF
+      sanitizer on the path. raeuberkrebs candidate — prove by driving the entrypoint at a loopback
+      canary.
+    pattern-sources:
+      - pattern: $R.body
+      - pattern: $R.query
+      - pattern: $R.params
+      - pattern: $R.headers
+      - pattern: $M.text
+      - pattern: $M.content
+      - pattern: $M.url
+    pattern-sanitizers:
+      - pattern: ssrfPolicy(...)
+      - pattern: isPrivateHost(...)
+      - pattern: isPrivateIp(...)
+      - pattern: assertPublic(...)
+      - pattern: safeFetch(...)
+      - pattern: validateUrl(...)
+      - pattern: new URL($U, ...)  # a fixed-base URL(input, BASE) can't change host — treat as clean
+    pattern-sinks:
+      - pattern: fetch($URL, ...)
+      - pattern: fetch($URL)
+      - pattern: axios($URL, ...)
+      - pattern: axios.$M($URL, ...)
+      - pattern: got($URL, ...)

@@ -3,10 +3,15 @@ import { openSandbox, type SandboxOptions } from "./sandbox.js";
 import type { Attacker } from "./attackers/attacker.js";
 import { CommandInjectionAttacker } from "./attackers/command-injection.js";
 import { PathTraversalAttacker } from "./attackers/path-traversal.js";
+import { SsrfAttacker } from "./attackers/ssrf.js";
 import type { Exploit, LaneStatus, RaeuberResult, Verdict } from "./types.js";
 
 /** The registered attack lanes (Node). */
-export const ATTACKERS: Attacker[] = [new CommandInjectionAttacker(), new PathTraversalAttacker()];
+export const ATTACKERS: Attacker[] = [
+  new CommandInjectionAttacker(),
+  new PathTraversalAttacker(),
+  new SsrfAttacker(),
+];
 
 function verdictFrom(lanes: LaneStatus[], exploits: Exploit[]): Verdict {
   if (exploits.length > 0) return "vulnerable";

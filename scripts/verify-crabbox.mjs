@@ -5,10 +5,12 @@
 import { openSandbox } from "../dist/sandbox.js";
 import { CommandInjectionAttacker } from "../dist/attackers/command-injection.js";
 import { PathTraversalAttacker } from "../dist/attackers/path-traversal.js";
+import { SsrfAttacker } from "../dist/attackers/ssrf.js";
 
 const LANES = [
   { attacker: new CommandInjectionAttacker(), file: "vuln.js", proof: "marker-executed" },
   { attacker: new PathTraversalAttacker(), file: "vuln.js", proof: "secret-exfiltrated" },
+  { attacker: new SsrfAttacker(), file: "vuln.js", proof: "oob-request" },
 ];
 
 let failed = 0;

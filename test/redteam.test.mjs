@@ -104,3 +104,36 @@ describe("raeuberkrebs path-traversal gate", () => {
     }
   });
 });
+
+const SSRF_FIXTURE = join(ROOT, "fixtures", "ssrf-node");
+
+describe("raeuberkrebs ssrf gate", () => {
+  it("fires on the planted fixture — an untrusted URL reaches an outbound fetch (oob-request)", () => {
+    const r = runRedteam(SSRF_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "ssrf");
+    assert.ok(e, "expected an ssrf exploit");
+    assert.equal(e.proof, "oob-request");
+    assert.match(e.payload, /127\.0\.0\.1/);
+    assert.match(e.evidence, /RAEUBER_[0-9a-f]+/);
+  });
+
+  it("does NOT fire when the fetch host is allowlisted (dynamic attack blocked)", () => {
+    const dir = scratch({
+      "guarded.js":
+        "function get(url){\n" +
+        "  const u = new URL(url);\n" +
+        '  if (u.hostname !== "api.example.com") throw new Error("host not allowed");\n' +
+        "  return fetch(url).then((r) => r.text());\n" +
+        "}\nmodule.exports.get = get;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["guarded.js"], LOCAL);
+      assert.equal(r.exploits.length, 0, "host allowlist must defeat the loopback-canary attack");
+      assert.notEqual(r.verdict, "vulnerable");
+      assert.ok(r.lanes.some((l) => l.attackClass === "ssrf" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

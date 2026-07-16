@@ -21,6 +21,36 @@ const SINK_RE =
 const AUTHORITY_FIXED_RE =
   /(?:fetch|axios(?:\.[a-z]+)?|got(?:\.[a-z]+)?|undici\.[a-z]+|https?\.[a-z]+)\s*\(\s*[`'"]https?:\/\/[a-zA-Z0-9.\-]+(?::\d+)?\//i;
 
+// #13 provenance refinement: a host-variable lead is down-ranked to `low` when the variable that
+// controls the host is CONFIG — assigned from `process.env` / an env helper / a literal URL — rather
+// than flowing in as an untrusted parameter. This is the piece that separates `fetch(`${baseUrl}/x`)`
+// (config) from `fetch(url)` where `url` is an entrypoint parameter (untrusted). Conservative: only
+// DOWN-ranks on a confident config signal; anything unresolved stays `high` (worth reach-the-sink).
+const CONFIG_RHS_RE = /process\.env|requiredEnv|getenv|['"`]https?:\/\//i;
+
+/** The identifier that controls the request host in a fetch line (or "process.env" for a direct env
+ *  read), else null. Covers a bare URL var, a `${var}`-led template, and a `"http://" + var` concat. */
+function hostVar(line: string): string | null {
+  const call = "(?:fetch|axios[.a-z]*|got[.a-z]*|undici\\.[a-z]+|https?\\.[a-z]+)";
+  if (new RegExp(`\\b${call}\\s*\\(\\s*[\`'"]?\\s*(?:\\$\\{\\s*)?process\\.env\\b`).test(line)) return "process.env";
+  let m = line.match(new RegExp(`\\b${call}\\s*\\(\\s*([A-Za-z_$][\\w$.]*)\\s*[,)]`));
+  if (m) return m[1];
+  m = line.match(new RegExp("\\b" + call + "\\s*\\(\\s*`\\$\\{\\s*([A-Za-z_$][\\w$.]*)"));
+  if (m) return m[1];
+  m = line.match(/['"]https?:\/\/['"]\s*\+\s*([A-Za-z_$][\w$.]*)/);
+  if (m) return m[1];
+  return null;
+}
+
+/** True if `v`'s definition in `source` is config (env / literal URL). Only a confident match. */
+function isConfigVar(v: string, source: string): boolean {
+  if (v === "process.env" || v.startsWith("process.env.")) return true;
+  const base = v.split(".")[0].replace(/[^\w$]/g, "");
+  if (!base) return false;
+  const m = source.match(new RegExp(`\\b(?:const|let|var)\\s+${base}\\s*=\\s*([^;\\n]+)`));
+  return m ? CONFIG_RHS_RE.test(m[1]) : false;
+}
+
 function firstSinkLine(source: string): number {
   const lines = source.split("\n");
   for (let i = 0; i < lines.length; i++) if (SINK_RE.test(lines[i])) return i + 1;
@@ -88,11 +118,12 @@ export class SsrfAttacker implements Attacker {
     for (let i = 0; i < lines.length; i++) {
       const m = lines[i].match(SINK_RE);
       if (!m) continue;
-      leads.push({
-        line: i + 1,
-        sink: m[0].split("(")[0].trim(),
-        priority: AUTHORITY_FIXED_RE.test(lines[i]) ? "low" : "high",
-      });
+      let priority: "high" | "low" = AUTHORITY_FIXED_RE.test(lines[i]) ? "low" : "high"; // #12 host-vs-path
+      if (priority === "high") {
+        const v = hostVar(lines[i]);
+        if (v && isConfigVar(v, source)) priority = "low"; // #13 config provenance → down-rank
+      }
+      leads.push({ line: i + 1, sink: m[0].split("(")[0].trim(), priority });
     }
     return leads;
   }

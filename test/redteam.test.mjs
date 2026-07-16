@@ -206,4 +206,16 @@ describe("lead precision (#10 cmd-inj, #12 ssrf ranking)", () => {
     const noSlash = ssrf.staticLeads("export const d = (p) => fetch(`https://api.github.com${p}`);");
     assert.equal(noSlash[0].priority, "high", "fixed host with NO slash before the var is subdomain/userinfo-injectable");
   });
+
+  it("#13: down-ranks a config-provenance host (env / literal URL) to low; keeps fn-param high", () => {
+    const ssrf = new SsrfAttacker();
+    const env = ssrf.staticLeads('const base = process.env.API ?? "https://x";\nexport const a = () => fetch(`${base}/y`);');
+    assert.equal(env[0].priority, "low", "env-derived host is config");
+    const lit = ssrf.staticLeads('const B = "https://api.example.com";\nexport const b = () => fetch(`${B}/y`);');
+    assert.equal(lit[0].priority, "low", "literal-URL const host is config");
+    const directEnv = ssrf.staticLeads("export const c = () => fetch(process.env.HOOK_URL);");
+    assert.equal(directEnv[0].priority, "low", "direct process.env read is config");
+    const param = ssrf.staticLeads("export function f(url){ return fetch(url); }");
+    assert.equal(param[0].priority, "high", "fn-parameter URL stays untrusted");
+  });
 });

@@ -11,6 +11,14 @@ import type { Sandbox } from "../sandbox.js";
  * (a free lead), then DRIVES adversarial payloads through the reachable entrypoints and keeps only
  * the ones that fire — a returned Exploit always carries observed evidence.
  */
+/** A static sink lead: a source line whose shape matches a lane's sink pattern. A lead is NOT a
+ *  finding — it is the FREE pre-filter that tells the hunt where to point the (expensive) prove
+ *  phase. Only an executed PoC is a finding. */
+export interface StaticLead {
+  line: number;
+  sink: string;
+}
+
 export interface Attacker {
   readonly attackClass: AttackClass;
   /** True if this lane can attack the given changed file (by language/extension). */
@@ -19,6 +27,21 @@ export interface Attacker {
   readonly canaryFixtureDir: string;
   /** Find and PROVE exploits of this class among `files`, using `sandbox` to execute PoCs. */
   hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[];
+  /** Every source line matching this lane's sink pattern — the hunt sweep's free pre-filter. The
+   *  gate and the hunt agree on "what a sink is" because both flow through this lane's SINK_RE. */
+  staticLeads(source: string): StaticLead[];
+}
+
+/** Collect every line whose text matches `re`, tagging the sink token (callee before `(`). Shared
+ *  by the lanes so the hunt sweep detects exactly the sinks the gate would drive. */
+export function scanSinkLeads(source: string, re: RegExp): StaticLead[] {
+  const leads: StaticLead[] = [];
+  const lines = source.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(re);
+    if (m) leads.push({ line: i + 1, sink: m[0].split("(")[0].trim() });
+  }
+  return leads;
 }
 
 /**

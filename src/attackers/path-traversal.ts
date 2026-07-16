@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
-import { type Attacker, freshMarker, nodeExportedNames, nodeRequireDriver } from "./attacker.js";
+import { type Attacker, type StaticLead, freshMarker, nodeExportedNames, nodeRequireDriver, scanSinkLeads } from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -28,6 +28,10 @@ export class PathTraversalAttacker implements Attacker {
 
   handles(file: string): boolean {
     return /\.(?:js|cjs)$/.test(file);
+  }
+
+  staticLeads(source: string): StaticLead[] {
+    return scanSinkLeads(source, SINK_RE);
   }
 
   hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {

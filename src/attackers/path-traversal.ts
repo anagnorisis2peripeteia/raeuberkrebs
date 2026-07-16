@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, freshMarker, nodeExportedNames, nodeRequireDriver, scanSinkLeads } from "./attacker.js";
+import { type Attacker, type StaticLead, NODE_RUN, NODE_SOURCE_RE, freshMarker, nodeExportedNames, nodeImportDriver, scanSinkLeads } from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -27,7 +27,7 @@ export class PathTraversalAttacker implements Attacker {
   readonly canaryFixtureDir = resolve(HERE, "..", "..", "fixtures", "path-traversal-node");
 
   handles(file: string): boolean {
-    return /\.(?:js|cjs)$/.test(file);
+    return NODE_SOURCE_RE.test(file);
   }
 
   staticLeads(source: string): StaticLead[] {
@@ -60,9 +60,9 @@ export class PathTraversalAttacker implements Attacker {
       for (const name of names) {
         if (fired) break;
         for (const payload of PAYLOADS) {
-          const driverRel = `.raeuber-driver-${freshMarker()}.cjs`;
-          sandbox.writeFile(driverRel, nodeRequireDriver(file, name, payload));
-          const run = sandbox.exec(`node ${driverRel} 2>&1`, 15_000);
+          const driverRel = `.raeuber-driver-${freshMarker()}.mjs`;
+          sandbox.writeFile(driverRel, nodeImportDriver(file, name, payload));
+          const run = sandbox.exec(`${NODE_RUN} ${driverRel} 2>&1`, 15_000);
           const out = run.stdout + run.stderr;
           if (out.includes(secret)) {
             exploits.push({

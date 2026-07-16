@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, freshMarker, nodeExportedNames, scanSinkLeads } from "./attacker.js";
+import { type Attacker, type StaticLead, NODE_RUN, NODE_SOURCE_RE, freshMarker, nodeExportedNames, scanSinkLeads } from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -32,8 +32,10 @@ function ssrfCanaryDriver(moduleRel: string, fnName: string, marker: string): st
   const mod = JSON.stringify("./" + moduleRel);
   const fn = JSON.stringify(fnName);
   const mk = JSON.stringify(marker);
+  // ESM driver (top-level await), run under `node --experimental-transform-types` so `import()`
+  // reaches .ts / .mjs / .cjs / .js entrypoints alike.
   return `
-const http = require("http");
+import http from "node:http";
 const MARKER = ${mk};
 let firedPayload = null, currentPayload = null, hitLine = null;
 const server = http.createServer((req, res) => {
@@ -42,25 +44,25 @@ const server = http.createServer((req, res) => {
   res.statusCode = 200; res.end("ok");
 });
 server.on("error", () => {});
-server.listen(0, "127.0.0.1", async () => {
-  const port = server.address().port;
-  let m; try { m = require(${mod}); } catch (e) { process.stdout.write("REQUIRE_FAIL:" + e); server.close(); return; }
-  const fn = (m && m[${fn}]) || (m && m.default && m.default[${fn}]) || (m && m.default);
-  if (typeof fn !== "function") { process.stdout.write("NOT_A_FUNCTION"); server.close(); return; }
-  const payloads = [
-    "http://127.0.0.1:" + port + "/" + MARKER,   // sink fetches the raw argument
-    "@127.0.0.1:" + port + "/" + MARKER,          // sink appends arg to a fixed host prefix (userinfo bypass)
-    "//127.0.0.1:" + port + "/" + MARKER,         // scheme-relative append
-  ];
-  for (const pl of payloads) {
-    if (firedPayload) break;
-    currentPayload = pl;
-    try { await fn(pl); } catch (e) { /* the request may throw after the connection lands; the OOB hit still counts */ }
-    await new Promise((r) => setTimeout(r, 150));
-  }
-  process.stdout.write(firedPayload ? ("OOB_FIRED payload=" + firedPayload + " req=" + hitLine) : "no-oob");
-  server.close();
-});
+await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+const port = server.address().port;
+let m;
+try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); server.close(); process.exit(0); }
+const fn = (m && m[${fn}]) || (m && m.default && (m.default[${fn}] || m.default));
+if (typeof fn !== "function") { process.stdout.write("NOT_A_FUNCTION"); server.close(); process.exit(0); }
+const payloads = [
+  "http://127.0.0.1:" + port + "/" + MARKER,   // sink fetches the raw argument
+  "@127.0.0.1:" + port + "/" + MARKER,          // sink appends arg to a fixed host prefix (userinfo bypass)
+  "//127.0.0.1:" + port + "/" + MARKER,         // scheme-relative append
+];
+for (const pl of payloads) {
+  if (firedPayload) break;
+  currentPayload = pl;
+  try { await fn(pl); } catch (e) { /* the request may throw after the connection lands; the OOB hit still counts */ }
+  await new Promise((r) => setTimeout(r, 150));
+}
+process.stdout.write(firedPayload ? ("OOB_FIRED payload=" + firedPayload + " req=" + hitLine) : "no-oob");
+server.close();
 `.trim();
 }
 
@@ -69,7 +71,7 @@ export class SsrfAttacker implements Attacker {
   readonly canaryFixtureDir = resolve(HERE, "..", "..", "fixtures", "ssrf-node");
 
   handles(file: string): boolean {
-    return /\.(?:js|cjs)$/.test(file);
+    return NODE_SOURCE_RE.test(file);
   }
 
   staticLeads(source: string): StaticLead[] {
@@ -96,9 +98,9 @@ export class SsrfAttacker implements Attacker {
       for (const name of names) {
         if (fired) break;
         const marker = freshMarker();
-        const driverRel = `.raeuber-driver-${marker}.cjs`;
+        const driverRel = `.raeuber-driver-${marker}.mjs`;
         sandbox.writeFile(driverRel, ssrfCanaryDriver(file, name, marker));
-        const run = sandbox.exec(`node ${driverRel} 2>&1`, 20_000);
+        const run = sandbox.exec(`${NODE_RUN} ${driverRel} 2>&1`, 20_000);
         const out = run.stdout + run.stderr;
         if (out.includes("OOB_FIRED") && out.includes(marker)) {
           const payload = out.match(/OOB_FIRED payload=(\S+)/)?.[1] ?? `http://127.0.0.1/${marker}`;

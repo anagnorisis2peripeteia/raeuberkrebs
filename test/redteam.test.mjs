@@ -18,6 +18,14 @@ function scratch(files) {
   return dir;
 }
 
+// ESM scratch (package `type: module`) — for .ts/.mjs targets that use `export` syntax.
+function scratchModule(files) {
+  const dir = mkdtempSync(join(tmpdir(), "rk-test-"));
+  writeFileSync(join(dir, "package.json"), '{"name":"s","version":"0.0.0","private":true,"type":"module"}');
+  for (const [name, body] of Object.entries(files)) writeFileSync(join(dir, name), body);
+  return dir;
+}
+
 describe("raeuberkrebs command-injection gate", () => {
   it("fires on the planted fixture and returns a proven, evidence-bearing PoC", () => {
     const r = runRedteam(FIXTURE, ["vuln.js"], LOCAL);
@@ -132,6 +140,46 @@ describe("raeuberkrebs ssrf gate", () => {
       assert.equal(r.exploits.length, 0, "host allowlist must defeat the loopback-canary attack");
       assert.notEqual(r.verdict, "vulnerable");
       assert.ok(r.lanes.some((l) => l.attackClass === "ssrf" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("raeuberkrebs TypeScript / ESM entrypoints", () => {
+  it("fires on a TypeScript (.ts) ESM entrypoint — types stripped, imported, driven", () => {
+    const dir = scratchModule({
+      "app.ts":
+        'import { execSync } from "node:child_process";\n' +
+        "export function run(cmd: string): string {\n" +
+        '  return execSync("ls " + cmd).toString();\n' +
+        "}\n",
+    });
+    try {
+      const r = runRedteam(dir, ["app.ts"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      assert.equal(r.exploits[0].attackClass, "command-injection");
+      assert.equal(r.exploits[0].file, "app.ts");
+      assert.equal(r.exploits[0].proof, "marker-executed");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fires SSRF on a .ts entrypoint (oob-request via loopback canary)", () => {
+    const dir = scratchModule({
+      "svc.ts":
+        "export async function pull(url: string): Promise<string> {\n" +
+        "  const r = await fetch(url);\n" +
+        "  return await r.text();\n" +
+        "}\n",
+    });
+    try {
+      const r = runRedteam(dir, ["svc.ts"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find((x) => x.attackClass === "ssrf");
+      assert.ok(e, "expected an ssrf exploit on the .ts entrypoint");
+      assert.equal(e.proof, "oob-request");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -54,29 +54,38 @@ export function freshMarker(): string {
   return "RAEUBER_" + randomBytes(9).toString("hex");
 }
 
+// Source files a Node lane can drive. Drivers run under `node --experimental-transform-types`, so a
+// single dynamic `import()` loads .ts (types stripped), .mjs/.cjs, and .js alike — see NODE_RUN in
+// the lanes. (.tsx/.jsx are excluded: JSX isn't type-stripped and UI components aren't entrypoints.)
+export const NODE_SOURCE_RE = /\.(?:ts|mts|cts|mjs|js|cjs)$/;
+
+/** How the lanes invoke a generated .mjs driver: type-stripping on, experimental warning silenced so
+ *  it can't pollute the marker evidence. Prefix for `sandbox.exec`. */
+export const NODE_RUN = "node --no-warnings --experimental-transform-types";
+
 /**
- * A CommonJS driver that requires `moduleRel` and calls `fnName(arg)` — the first parameter, the
- * canonical injectable position — then prints anything the call returns or an error carries, so
- * output produced by the exercised sink (an echoed marker, a traversed file's contents) is
- * observable. Shared by the Node lanes. CommonJS require runs without a build step (Chunk 0 targets
- * .js/.cjs; .mjs/.ts transpile is a later refinement).
+ * An ES-module driver that dynamically imports `moduleRel` and calls `fnName(arg)` — the first
+ * parameter, the canonical injectable position — then prints anything the call returns or an error
+ * carries, so output produced by the exercised sink (an echoed marker, a traversed file's contents)
+ * is observable. Shared by the Node lanes. `import()` under `--experimental-transform-types` drives
+ * .ts / .mjs / .cjs / .js with no build step (the CJS require-driver couldn't reach TS/ESM). Must be
+ * written to a `.mjs` file (top-level await).
  */
-export function nodeRequireDriver(moduleRel: string, fnName: string, arg: string): string {
+export function nodeImportDriver(moduleRel: string, fnName: string, arg: string): string {
   const a = JSON.stringify(arg);
   const mod = JSON.stringify("./" + moduleRel);
   const fn = JSON.stringify(fnName);
   return `
-(async () => {
-  let m; try { m = require(${mod}); } catch (e) { process.stdout.write("REQUIRE_FAIL:" + e); return; }
-  const fn = (m && m[${fn}]) || (m && m.default && m.default[${fn}]) || (m && m.default);
-  if (typeof fn !== "function") { process.stdout.write("NOT_A_FUNCTION"); return; }
-  try {
-    const r = await fn(${a});
-    process.stdout.write(String(r && r.stdout ? r.stdout : (r == null ? "" : r)));
-  } catch (e) {
-    process.stdout.write(String((e && e.stdout) || (e && e.message) || e || ""));
-  }
-})();
+let m;
+try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }
+const fn = (m && m[${fn}]) || (m && m.default && (m.default[${fn}] || m.default));
+if (typeof fn !== "function") { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
+try {
+  const r = await fn(${a});
+  process.stdout.write(String(r && r.stdout ? r.stdout : (r == null ? "" : r)));
+} catch (e) {
+  process.stdout.write(String((e && e.stdout) || (e && e.message) || e || ""));
+}
 `.trim();
 }
 

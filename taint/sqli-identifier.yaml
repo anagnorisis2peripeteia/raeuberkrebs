@@ -1,0 +1,20 @@
+# raeuberkrebs — SQL identifier injection guard-consistency (#16 / CWE-89).
+# A SQL identifier is interpolated into a template literal passed to db.exec/db.prepare with NO
+# identifier-quoting guard (quoteSqliteIdentifier). openclaw wraps ids in sqlite-strict.ts but NOT in
+# sqlite-index-schema.ts (`DROP INDEX main.${index.name}`) / task-registry (`CREATE TEMP TABLE ${t}`).
+# Most PRAGMA/SAVEPOINT interpolations are constants (leads); raeuberkrebs PROVES by driving a
+# malicious identifier through the entrypoint.
+rules:
+  - id: raeuber-sqli-raw-identifier-interpolation
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: >-
+      A SQL statement is built by interpolating a value into a template literal passed to
+      db.exec/db.prepare with no identifier-quoting guard (quoteSqliteIdentifier). SQL injection if the
+      value is attacker-controlled. raeuberkrebs candidate — prove by driving a malicious identifier.
+    patterns:
+      - pattern-either:
+          - pattern: $DB.exec(`...${$X}...`)
+          - pattern: $DB.prepare(`...${$X}...`)
+      - pattern-not: $DB.exec(`...${quoteSqliteIdentifier(...)}...`)
+      - pattern-not: $DB.prepare(`...${quoteSqliteIdentifier(...)}...`)

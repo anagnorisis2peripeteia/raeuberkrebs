@@ -1,0 +1,6 @@
+{
+  "name": "raeuber-fixture-sqli-identifier",
+  "version": "0.0.0",
+  "private": true,
+  "main": "vuln.js"
+}

@@ -31,7 +31,10 @@ export type AttackClass =
   | "insecure-tls" // TLS certificate validation is disabled — a custom accept-any-cert callback or revocation turned off makes the node trust any server, enabling MITM (CWE-295)
   | "xxe" // XML parsed with DTD/external-entity resolution enabled on attacker-supplied XML — file read / SSRF via external entities (CWE-611)
   | "insecure-temp-file" // a predictable temp path (Path.GetTempFileName / GetTempPath) holds sensitive data — race / symlink / predictable-name attack (CWE-377)
-  | "webview-injection"; // untrusted input is concatenated/interpolated into a WebView ExecuteScriptAsync/NavigateToString call — script/HTML injection into the trusted WebView origin (CWE-79/94)
+  | "webview-injection" // untrusted input is concatenated/interpolated into a WebView ExecuteScriptAsync/NavigateToString call — script/HTML injection into the trusted WebView origin (CWE-79/94)
+  | "weak-random" // a non-cryptographic RNG (System.Random) generates a security value (token/key/nonce/salt/otp) — predictable / brute-forceable (CWE-330/338)
+  | "argument-injection" // untrusted input concatenated into a process ARGUMENT string (ProcessStartInfo.Arguments) rather than an arg list — injects extra flags to the spawned program (CWE-88)
+  | "toctou"; // a File/Directory.Exists check guards a later file op on the same path — the path can change between check and use (symlink race) (CWE-367)
 
 export const ATTACK_CLASSES: AttackClass[] = [
   "command-injection",

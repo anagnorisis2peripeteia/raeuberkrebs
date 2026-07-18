@@ -136,3 +136,38 @@ export const WebViewInjectionDotnetAttacker = new StaticDotnetLane(
   "webview-injection",
   /ExecuteScriptAsync\s*\(\s*(?:\$@?"|[A-Za-z_]\w*\s*\+|@?"[^"]*"\s*\+)|NavigateToString\s*\(\s*(?:\$@?"|[A-Za-z_]\w*\s*\+|@?"[^"]*"\s*\+)/,
 );
+
+// ── Round 3: weak-random, argument-injection, TOCTOU.
+
+// weak-random: a non-cryptographic RNG (System.Random / Random.Shared) produces a SECURITY value —
+// token/key/nonce/salt/otp/password/iv. `new Random()` is ubiquitous and mostly benign (UI, jitter),
+// so the sink requires a security-shaped target ON THE LINE to stay out of the noise: a security-
+// named var assigned from `new Random`, or a Random.Next(...) whose line names a security value.
+// Guard-gap = the file uses RandomNumberGenerator (the crypto RNG that IS the fix) (CWE-330/338).
+export const WeakRandomDotnetAttacker = new StaticDotnetLane(
+  "weak-random",
+  // 3 shapes: (1) a security-named var assigned from `new Random`; (2) ANY `.NextBytes(` — a
+  // System.Random method (the crypto RNG uses .GetBytes/.Fill), so filling a buffer with it is the
+  // weak-RNG-for-key/nonce tell regardless of the receiver var; (3) a Random.Next* on a security line.
+  /(?:token|key|secret|nonce|salt|\biv\b|otp|password|passcode|\bpin\b|seed|session)\w*\s*=\s*[^;=\n]*\bnew\s+Random\b|\.NextBytes\s*\(|\b(?:new\s+Random\s*\([^)]*\)|Random\.Shared)\s*\.\s*Next\w*\b[^;\n]*(?:token|key|secret|nonce|salt|otp|password|passcode|\bpin\b)/i,
+);
+
+// argument-injection: untrusted data concatenated/interpolated into a process ARGUMENT string
+// (ProcessStartInfo.Arguments), rather than the safe ArgumentList — a crafted value injects extra
+// flags/args to the spawned program (distinct from shell command-injection; the program runs, but
+// with attacker-added switches). Guard-gap = the file uses ArgumentList. Taint-gated (CWE-88).
+export const ArgumentInjectionDotnetAttacker = new StaticDotnetLane(
+  "argument-injection",
+  /\.Arguments\s*=\s*[^;\n]*(?:\+|\$@?")|new\s+ProcessStartInfo\s*\(\s*[^,)\n]+,\s*[^)\n]*(?:\+|\$@?")/,
+  true,
+);
+
+// toctou: a File.Exists / Directory.Exists used AS A CONDITION — the classic check-then-use race,
+// where the path can change between the check and a later open/create/delete (esp. a symlink swap on
+// an attacker-writable dir). Coarse lead: a reviewer confirms an unguarded use on the same path
+// follows without an atomic handle. Taint-gated to files that surface untrusted input (CWE-367).
+export const ToctouDotnetAttacker = new StaticDotnetLane(
+  "toctou",
+  /\bif\s*\(\s*!?\s*(?:File|Directory)\.Exists\s*\(/,
+  true,
+);

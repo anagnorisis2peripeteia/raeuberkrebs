@@ -31,6 +31,9 @@ import {
   InsecureTempFileDotnetAttacker,
   ZipSlipDotnetAttacker,
   WebViewInjectionDotnetAttacker,
+  WeakRandomDotnetAttacker,
+  ArgumentInjectionDotnetAttacker,
+  ToctouDotnetAttacker,
 } from "./attackers/dotnet-more-lanes.js";
 import type { Exploit, LaneStatus, RaeuberResult, Verdict } from "./types.js";
 
@@ -70,6 +73,10 @@ export const ATTACKERS: Attacker[] = [
   InsecureTempFileDotnetAttacker,
   ZipSlipDotnetAttacker,
   WebViewInjectionDotnetAttacker,
+  // Round-3 lanes: weak-random (security RNG), argument-injection (process args), TOCTOU.
+  WeakRandomDotnetAttacker,
+  ArgumentInjectionDotnetAttacker,
+  ToctouDotnetAttacker,
 ];
 
 function verdictFrom(lanes: LaneStatus[], exploits: Exploit[]): Verdict {

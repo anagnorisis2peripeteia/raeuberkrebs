@@ -8,6 +8,7 @@ import { PathTraversalSwiftAttacker } from "./attackers/path-traversal-swift.js"
 import { PathTraversalAttacker } from "./attackers/path-traversal.js";
 import { SsrfSwiftAttacker } from "./attackers/ssrf-swift.js";
 import { ResourceExhaustionSwiftAttacker } from "./attackers/resource-exhaustion-swift.js";
+import { SqlInjectionSwiftAttacker } from "./attackers/sql-injection-swift.js";
 import { SsrfAttacker } from "./attackers/ssrf.js";
 import { CsvInjectionAttacker } from "./attackers/csv-injection.js";
 import { BrokenAccessControlAttacker } from "./attackers/broken-access-control.js";
@@ -47,6 +48,7 @@ export const ATTACKERS: Attacker[] = [
   new PathTraversalAttacker(),
   new SsrfSwiftAttacker(),
   new ResourceExhaustionSwiftAttacker(),
+  new SqlInjectionSwiftAttacker(),
   new SsrfAttacker(),
   new CsvInjectionAttacker(),
   new BrokenAccessControlAttacker(),

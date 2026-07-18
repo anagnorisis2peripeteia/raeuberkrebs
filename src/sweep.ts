@@ -10,7 +10,7 @@ import type { AttackClass } from "./types.js";
 // prove phase, never a finding. This is the cost control the crabbox lesson demands: the
 // deterministic sweep is free, so the LLM+sandbox fan-out only ever touches the density head.
 
-const SOURCE_EXTS = ["ts", "mts", "cts", "js", "cjs", "mjs", "swift"];
+const SOURCE_EXTS = ["ts", "mts", "cts", "js", "cjs", "mjs", "cs", "swift"];
 // Exclude tests/fixtures/build output/vendored code — same spirit as the gate's scope.
 const SKIP_RE =
   /(\.test\.|\.spec\.|-harness\.|(^|\/)test-support\/|(^|\/)tests?\/|(^|\/)__tests__\/|(^|\/)e2e\/|(^|\/)fixtures?\/|(^|\/)scripts?\/|(^|\/)dist\/|(^|\/)build\/|(^|\/)node_modules\/|(^|\/)\.git\/|(^|\/)\.agents\/|\.d\.ts$)/;
@@ -20,10 +20,18 @@ const SKIP_RE =
 // guard in 155 files); the bug is the sink site whose file doesn't reference one. Per-file heuristic
 // — coarse (a guard reached via a cross-file wrapper is missed); full inter-procedural taint is #16.
 const SANITIZER_SIGNALS: Partial<Record<AttackClass, RegExp>> = {
-  ssrf: /\bssrf\b|ssrfPolicy|ssrfGuard|isPrivate(?:Host|Ip|Address)|blocked?Hosts?|denyHost|allow-?list|allowedHosts?|assertPublic|safeFetch|guardedFetch|validateUrl|isAllowedUrl|resolvePublicUrl/i,
-  "path-traversal": /isPathInside|sanitize(?:Path|Filename)|assertWithin|containsTraversal|resolveWithin|safeJoin|isSubPath/i,
-  "missing-authentication": /Authenticat|Authoriz|VerifySignature|ValidateToken|\bbearer\b|apiKey|requireAuth|\bhmac\b|signatureValid/i,
-  "broken-object-access": /OwnerId|ownedBy|IsOwner|belongsTo|\bprincipal\b|CheckOwnership|assertOwn|scopedTo/i,
+  // Node + C# guard names (union): a file referencing any of these is treated as guarding the class.
+  ssrf: /\bssrf\b|ssrfPolicy|ssrfGuard|isPrivate(?:Host|Ip|Address)|blocked?Hosts?|denyHost|allow-?list|allowedHosts?|assertPublic|safeFetch|guardedFetch|validateUrl|isAllowedUrl|resolvePublicUrl|IsPrivateOrLoopback|HttpUrlRiskEvaluator|HttpUrlValidator|IsUrlSafe|DangerousUrlPattern|CanvasUrlSafety|BuildSafeHandler|hostAllowlist/i,
+  "path-traversal": /isPathInside|sanitize(?:Path|Filename)|assertWithin|containsTraversal|resolveWithin|safeJoin|isSubPath|IsPathWithinRoot|GetFinalPathFromHandle|ResolveLinkTarget|writeExternalFileWithinRoot|GetFullPath|IsWithin/i,
+  "missing-authentication": /Authenticat|Authoriz|VerifySignature|ValidateToken|\bbearer\b|apiKey|IsAuthenticated|CheckToken|requireAuth|\bhmac\b|McpAuthToken|BearerToken|signatureValid|ConstantTimeEquals|FixedTimeEquals/i,
+  "broken-object-access": /OwnerId|ownedBy|IsOwner|belongsTo|\bprincipal\b|CheckOwnership|assertOwn|IsAuthorizedFor|scopedTo|AccessControl|RequireScope|EnsureApproved/i,
+  // Round-2 breadth lanes with a project-owned guard: a file that hardens the class references one
+  // of these, so a sink site that doesn't is the guard-gap. (insecure-tls / weak-crypto / insecure-
+  // temp-file have no "guard" — the primitive itself is the risk — so they get no signal and never
+  // appear in guardGaps; they still surface as raw leads / density.)
+  xxe: /DtdProcessing\.(?:Prohibit|Ignore)|XmlResolver\s*=\s*null|XmlSecureResolver/i,
+  "zip-slip": /GetFullPath|IsPathWithinRoot|IsWithin\b|StartsWith\s*\([^)]*(?:root|dest|target|extract|base)/i,
+  "webview-injection": /JsonSerializer\.Serialize|JavaScriptStringEncode|HtmlEncode|EscapeDataString|JsonEncodedText|Encodings\.Web|SanitizeHtml/i,
 };
 
 export interface SweepLead {
@@ -38,6 +46,10 @@ export interface SweepLead {
    *  this file — a guard-consistency gap, the sharpest reach-the-sink target. `undefined` = no guard
    *  signal is known for this lane. */
   guardCovered?: boolean;
+  /** Divergence weight: how many OTHER files in the repo reference this lane's guard. Set only on
+   *  `divergenceGaps` entries. High = the project adopts this guard widely, so a lone gap here is a
+   *  missed sibling path (a real bug) rather than a class the project simply doesn't guard. */
+  guardAdoption?: number;
 }
 
 export interface SweepReport {
@@ -50,6 +62,11 @@ export interface SweepReport {
    *  where a project that guards this class elsewhere most likely missed a path. Full inter-procedural
    *  taint is the aspiration; this per-file signal is the tractable first cut. */
   guardGaps: SweepLead[];
+  /** The sharpened guard-gaps: the subset of `guardGaps` in a class the project guards in ≥2 OTHER
+   *  files — proof it knows and handles the risk elsewhere, so a bare sink here is a missed sibling
+   *  path, not an unguarded class. This is the exact shape behind every filed windows-node advisory
+   *  (present vs navigate; one env-sanitizer path vs its sibling). Ranked by `guardAdoption` desc. */
+  divergenceGaps: SweepLead[];
 }
 
 /** Prefer `git ls-files` (respects .gitignore, fast); fall back to a bounded fs walk for a
@@ -96,6 +113,9 @@ export function sweepRepo(repo: string, opts: { top?: number } = {}): SweepRepor
   const files = listSourceFiles(repo);
   const leads: SweepLead[] = [];
   const perFile = new Map<string, number>();
+  // Divergence signal: per lane, how many files reference the project's OWN guard for that class.
+  // A guard the project adopts widely (high count) but skips at one sink site is the sharpest lead.
+  const guardAdoption = new Map<AttackClass, number>();
 
   for (const rel of files) {
     let src: string;
@@ -109,7 +129,12 @@ export function sweepRepo(repo: string, opts: { top?: number } = {}): SweepRepor
     for (const lane of Object.keys(SANITIZER_SIGNALS) as AttackClass[]) {
       if (SANITIZER_SIGNALS[lane]!.test(src)) guarded.add(lane);
     }
+    // Repo-wide guard adoption per class — the denominator for the divergence signal below.
+    for (const lane of guarded) guardAdoption.set(lane, (guardAdoption.get(lane) ?? 0) + 1);
     for (const attacker of ATTACKERS) {
+      // Language-partition: a lane only scans files it handles (C# lanes → .cs, Node lanes → .ts/.js),
+      // so a JS sink pattern never fires on a .cs file and vice versa.
+      if (!attacker.handles(rel)) continue;
       const hasSignal = Boolean(SANITIZER_SIGNALS[attacker.attackClass]);
       for (const lead of attacker.staticLeads(src)) {
         leads.push({
@@ -136,5 +161,16 @@ export function sweepRepo(repo: string, opts: { top?: number } = {}): SweepRepor
   // guard for that sink family (the class a well-engineered project ships: guarded everywhere but here).
   const guardGaps = leads.filter((l) => l.priority !== "low" && l.guardCovered === false);
 
-  return { repo, filesScanned: files.length, leads, densityRanked, guardGaps };
+  // Divergence (#16 sharpened): keep only guard-gaps in a class the project guards in ≥2 OTHER files
+  // — proving it knows the risk and handles it elsewhere, so a bare sink here is a missed sibling
+  // path, not an unguarded class. Every filed windows-node advisory had exactly this shape (present
+  // vs navigate; one env-sanitizer path vs its sibling). Ranked by adoption: the more places the
+  // project guards this class, the more a lone gap reads as a real bug.
+  const DIVERGENCE_MIN_ADOPTION = 2;
+  const divergenceGaps = guardGaps
+    .map((l) => ({ ...l, guardAdoption: guardAdoption.get(l.lane) ?? 0 }))
+    .filter((l) => (l.guardAdoption ?? 0) >= DIVERGENCE_MIN_ADOPTION)
+    .sort((a, b) => (b.guardAdoption ?? 0) - (a.guardAdoption ?? 0));
+
+  return { repo, filesScanned: files.length, leads, densityRanked, guardGaps, divergenceGaps };
 }

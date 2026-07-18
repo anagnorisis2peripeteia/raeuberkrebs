@@ -1,0 +1,23 @@
+# raeuberkrebs — CSV / formula injection guard-consistency (#16 / CWE-1236).
+# Structural intra-file signal: a function that RFC-4180-quotes a CSV cell (doubles ") but never
+# neutralizes a leading formula char (=,+,-,@,tab) — the exact class of the OpenClaw usage-export
+# finding (guard present in google-meet csvCell, missing in ui/.../query.ts csvEscape). raeuberkrebs
+# PROVES a hit by exporting a cell beginning with "=" and observing it survive live.
+rules:
+  - id: raeuber-csv-formula-injection-missing-neutralizer
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: >-
+      A CSV/TSV cell is RFC-4180-quoted (doubling ") but a leading formula char (=,+,-,@,tab) is not
+      neutralized (CWE-1236). Guard-consistency gap. raeuberkrebs candidate — prove by exporting a
+      cell beginning with "=".
+    patterns:
+      - pattern-either:
+          - pattern: $X.replaceAll('"', '""')
+          - pattern: $X.replace(/"/g, '""')
+      - pattern-not-inside: |
+          function $F(...) {
+            ...
+            neutralizeSpreadsheetFormulaCell(...)
+            ...
+          }

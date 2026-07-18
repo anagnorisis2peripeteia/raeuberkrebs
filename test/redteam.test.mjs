@@ -145,6 +145,39 @@ describe("raeuberkrebs command-injection gate (Swift lane)", () => {
   });
 });
 
+const PT_SWIFT_FIXTURE = join(ROOT, "fixtures", "path-traversal-swift");
+
+describe("raeuberkrebs path-traversal gate (Swift lane)", () => {
+  it("fires on the planted Swift fixture — reads a decoy via ../ (secret-exfiltrated)", () => {
+    const r = runRedteam(PT_SWIFT_FIXTURE, ["vuln.swift"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    assert.equal(r.exploits.length, 1);
+    const e = r.exploits[0];
+    assert.equal(e.attackClass, "path-traversal");
+    assert.equal(e.proof, "secret-exfiltrated");
+    assert.match(e.evidence, /RAEUBER_[0-9a-f]+_TRAVERSAL_SECRET/);
+  });
+
+  it("does NOT fire on a safe fixed-path read (no false positive)", () => {
+    const dir = scratch({
+      "safe.swift": [
+        "import Foundation",
+        "func readNotes(_ name: String) -> String {",
+        "  _ = name",
+        '  return (try? String(contentsOfFile: "/etc/hostname", encoding: .utf8)) ?? ""',
+        "}",
+      ].join("\n"),
+    });
+    try {
+      const r = runRedteam(dir, ["safe.swift"], LOCAL);
+      assert.equal(r.exploits.length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const PT_FIXTURE = join(ROOT, "fixtures", "path-traversal-node");
 
 describe("raeuberkrebs path-traversal gate", () => {

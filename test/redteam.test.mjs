@@ -293,6 +293,39 @@ describe("raeuberkrebs sql-injection gate (Swift lane)", () => {
   });
 });
 
+const CSV_SWIFT_FIXTURE = join(ROOT, "fixtures", "csv-injection-swift");
+
+describe("raeuberkrebs csv-injection gate (Swift lane)", () => {
+  it("fires on the planted Swift fixture — a =<marker> cell survives un-neutralized (formula-unescaped)", () => {
+    const r = runRedteam(CSV_SWIFT_FIXTURE, ["vuln.swift"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    assert.equal(r.exploits.length, 1);
+    assert.equal(r.exploits[0].attackClass, "csv-injection");
+    assert.equal(r.exploits[0].proof, "formula-unescaped");
+  });
+
+  it("does NOT fire when the cell is formula-prefix guarded (no false positive)", () => {
+    const dir = scratch({
+      "safe.swift": [
+        "import Foundation",
+        "func csvCell(_ value: String) -> String {",
+        "  var v = value",
+        '  if let f = v.first, "=+-@".contains(f) { v = "\x27" + v }',
+        '  if v.contains(",") || v.contains("\"") { v = "\"" + v.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }',
+        '  return v + ",count"',
+        "}",
+      ].join("\n"),
+    });
+    try {
+      const r = runRedteam(dir, ["safe.swift"], LOCAL);
+      assert.equal(r.exploits.length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const PT_FIXTURE = join(ROOT, "fixtures", "path-traversal-node");
 
 describe("raeuberkrebs path-traversal gate", () => {

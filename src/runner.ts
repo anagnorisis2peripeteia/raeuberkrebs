@@ -3,7 +3,9 @@ import { openSandbox, type SandboxOptions } from "./sandbox.js";
 import type { Attacker } from "./attackers/attacker.js";
 import { CommandInjectionAttacker } from "./attackers/command-injection.js";
 import { CommandInjectionSwiftAttacker } from "./attackers/command-injection-swift.js";
+import { PathTraversalSwiftAttacker } from "./attackers/path-traversal-swift.js";
 import { PathTraversalAttacker } from "./attackers/path-traversal.js";
+import { SsrfSwiftAttacker } from "./attackers/ssrf-swift.js";
 import { SsrfAttacker } from "./attackers/ssrf.js";
 import { CsvInjectionAttacker } from "./attackers/csv-injection.js";
 import type { Exploit, LaneStatus, RaeuberResult, Verdict } from "./types.js";
@@ -12,7 +14,9 @@ import type { Exploit, LaneStatus, RaeuberResult, Verdict } from "./types.js";
 export const ATTACKERS: Attacker[] = [
   new CommandInjectionAttacker(),
   new CommandInjectionSwiftAttacker(),
+  new PathTraversalSwiftAttacker(),
   new PathTraversalAttacker(),
+  new SsrfSwiftAttacker(),
   new SsrfAttacker(),
   new CsvInjectionAttacker(),
 ];

@@ -216,6 +216,41 @@ describe("raeuberkrebs ssrf gate (Swift lane)", () => {
   });
 });
 
+const REDOS_SWIFT_FIXTURE = join(ROOT, "fixtures", "resource-exhaustion-swift");
+
+describe("raeuberkrebs resource-exhaustion gate (Swift lane)", () => {
+  it("fires on the planted Swift fixture — a catastrophic regex hangs on a crafted input (input-caused-hang)", () => {
+    const r = runRedteam(REDOS_SWIFT_FIXTURE, ["vuln.swift"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    assert.equal(r.exploits.length, 1);
+    const e = r.exploits[0];
+    assert.equal(e.attackClass, "resource-exhaustion");
+    assert.equal(e.proof, "input-caused-hang");
+    assert.match(e.evidence, /BENIGN_OK/);
+  });
+
+  it("does NOT fire on a linear (anchored) regex (no false positive)", () => {
+    const dir = scratch({
+      "safe.swift": [
+        "import Foundation",
+        "func parseVersion(_ raw: String) -> Int {",
+        '  let pattern = #"^[0-9]+(?:\\.[0-9]+)*$"#',
+        "  guard let re = try? NSRegularExpression(pattern: pattern) else { return 0 }",
+        "  let r = NSRange(raw.startIndex..<raw.endIndex, in: raw)",
+        "  return re.matches(in: raw, options: [], range: r).count",
+        "}",
+      ].join("\n"),
+    });
+    try {
+      const r = runRedteam(dir, ["safe.swift"], LOCAL);
+      assert.equal(r.exploits.length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const PT_FIXTURE = join(ROOT, "fixtures", "path-traversal-node");
 
 describe("raeuberkrebs path-traversal gate", () => {

@@ -8,6 +8,7 @@ import { dirname, resolve } from "node:path";
 import { runRedteam } from "../dist/runner.js";
 import { CommandInjectionAttacker } from "../dist/attackers/command-injection.js";
 import { SsrfAttacker } from "../dist/attackers/ssrf.js";
+import { BrokenAccessControlAttacker } from "../dist/attackers/broken-access-control.js";
 import { sweepRepo } from "../dist/sweep.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -406,6 +407,352 @@ describe("raeuberkrebs csv-injection gate (models the openclaw google-meet findi
       const r = runRedteam(dir, ["safe.js"], LOCAL);
       assert.equal(r.exploits.filter((x) => x.attackClass === "csv-injection").length, 0, "a neutralised serialiser must not fire");
       assert.ok(r.lanes.some((l) => l.attackClass === "csv-injection" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+const BAC_FIXTURE = join(ROOT, "fixtures", "broken-access-control-node");
+
+describe("raeuberkrebs broken-access-control gate (models the openclaw GHSA-j4mm privilege-escalation)", () => {
+  it("fires on the planted differential — a WRITE path reaches an ADMIN-gated effect (privilege-escalated)", () => {
+    const r = runRedteam(BAC_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "broken-access-control");
+    assert.ok(e, "expected a broken-access-control exploit");
+    assert.equal(e.proof, "privilege-escalated");
+    assert.match(e.sink, /authz-differential\(applySetting\)/);
+    assert.match(e.summary, /createSetting/);
+    assert.match(e.summary, /patchSetting/);
+  });
+
+  it("fires on NOVEL differential code — an EDITOR path reaches an ADMIN-gated effect (generalizes)", () => {
+    const dir = scratch({
+      "acl.js":
+        "const state = {};\n" +
+        "function persist(v){ state.v = v; return { v: state.v }; }\n" +
+        "function editItem(ctx, v){ if (!ctx || !ctx.scopes.includes('editor')) throw new Error('forbidden: editor scope required'); return persist(v); }\n" +
+        "function adminItem(ctx, v){ if (!ctx || !ctx.scopes.includes('admin')) throw new Error('forbidden: admin scope required'); return persist(v); }\n" +
+        "module.exports.editItem = editItem;\n" +
+        "module.exports.adminItem = adminItem;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["acl.js"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find((x) => x.attackClass === "broken-access-control");
+      assert.ok(e, "expected a broken-access-control exploit on novel code");
+      assert.equal(e.proof, "privilege-escalated");
+      assert.match(e.sink, /authz-differential\(persist\)/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire when both entrypoints enforce the SAME scope (no differential)", () => {
+    const dir = scratch({
+      "same.js":
+        "const s = {};\n" +
+        "function a(ctx, v){ if (!ctx || !ctx.scopes.includes('admin')) throw new Error('admin required'); s.v = v; return s.v; }\n" +
+        "function b(ctx, v){ if (!ctx || !ctx.scopes.includes('admin')) throw new Error('admin required'); s.v = v; return s.v; }\n" +
+        "module.exports.a = a;\nmodule.exports.b = b;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["same.js"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "broken-access-control").length, 0, "equal guards on the same effect is not an escalation");
+      assert.ok(r.lanes.some((l) => l.attackClass === "broken-access-control" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire when the weaker path reaches a DIFFERENT effect (no shared sink)", () => {
+    const dir = scratch({
+      "distinct.js":
+        "const s = {};\n" +
+        "function readItem(ctx){ if (!ctx || !ctx.scopes.includes('read')) throw new Error('read required'); return s.value; }\n" +
+        "function adminWrite(ctx, v){ if (!ctx || !ctx.scopes.includes('admin')) throw new Error('admin required'); s.value = v; return s.value; }\n" +
+        "module.exports.readItem = readItem;\nmodule.exports.adminWrite = adminWrite;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["distinct.js"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "broken-access-control").length, 0, "different effects share no sink → no differential");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fires on a BURIED differential — write reaches an admin effect through an internal helper chain (inter-procedural)", () => {
+    const dir = scratch({
+      "buried.js":
+        "const s = {};\n" +
+        "function reallyApply(v){ s.v = v; return { v: s.v }; }\n" + // the real privileged effect
+        "function helper(v){ return reallyApply(v); }\n" + // an internal hop
+        "function writeThing(ctx, v){ if (!ctx || !ctx.scopes.includes('write')) throw new Error('write required'); return helper(v); }\n" + // write -> helper -> reallyApply
+        "function adminThing(ctx, v){ if (!ctx || !ctx.scopes.includes('admin')) throw new Error('admin required'); return reallyApply(v); }\n" + // admin -> reallyApply direct
+        "module.exports.writeThing = writeThing;\nmodule.exports.adminThing = adminThing;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["buried.js"], LOCAL);
+      assert.equal(r.verdict, "vulnerable", "inter-procedural closure should reach the buried shared effect");
+      const e = r.exploits.find((x) => x.attackClass === "broken-access-control");
+      assert.ok(e, "expected a buried broken-access-control exploit");
+      assert.match(e.sink, /authz-differential\(reallyApply\)/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire on a shared HARNESS wrapper (callback passthrough is not a shared effect) — issue #23", () => {
+    const dir = scratch({
+      "harness.js":
+        "const s = {};\n" +
+        "function runWorkspace(params){ return params.run(); }\n" + // harness: delegates to caller's callback
+        "function readOne(ctx){ if (!ctx || !ctx.scopes.includes('read')) throw new Error('read required'); return runWorkspace({ run: () => s.x }); }\n" +
+        "function adminMutate(ctx, v){ if (!ctx || !ctx.scopes.includes('admin')) throw new Error('admin required'); return runWorkspace({ run: () => { s.x = v; return s.x; } }); }\n" +
+        "module.exports.readOne = readOne;\nmodule.exports.adminMutate = adminMutate;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["harness.js"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "broken-access-control").length, 0, "a shared harness wrapper is plumbing, not a shared effect");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("bac staticLeads surfaces authorization-decision lines as the differential lead surface", () => {
+    const bac = new BrokenAccessControlAttacker();
+    const leads = bac.staticLeads(
+      "export function create(ctx){ if (!ctx.scopes.includes('write')) throw 0; return apply(); }\n" +
+        "export function patch(ctx){ if (!ctx.scopes.includes('admin')) throw 0; return apply(); }\n",
+    );
+    assert.ok(leads.length >= 2, "each scope-check line is an authz lead");
+  });
+});
+
+const BOA_FIXTURE = join(ROOT, "fixtures", "broken-object-access-node");
+
+describe("raeuberkrebs broken-object-access gate (IDOR / CWE-639 — object-level authorization)", () => {
+  it("fires on the planted IDOR — one identity reads another's object by id (foreign-object-accessed)", () => {
+    const r = runRedteam(BOA_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "broken-object-access");
+    assert.ok(e, "expected a broken-object-access exploit");
+    assert.equal(e.proof, "foreign-object-accessed");
+    assert.match(e.sink, /object-access\(getDoc\)/);
+  });
+
+  it("fires on NOVEL IDOR code — differently-named create/fetch pair (generalizes)", () => {
+    const dir = scratch({
+      "store.js":
+        "const records = {}; let n = 0;\n" +
+        "function addRecord(ctx, data){ const key = 'r' + (++n); records[key] = { owner: ctx.userId, data }; return { key }; }\n" +
+        "function fetchRecord(ctx, key){ const r = records[key]; if (!r) throw new Error('missing'); return { key, data: r.data }; }\n" + // no ownership check
+        "module.exports.addRecord = addRecord;\nmodule.exports.fetchRecord = fetchRecord;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["store.js"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find((x) => x.attackClass === "broken-object-access");
+      assert.ok(e, "expected an IDOR exploit on novel code");
+      assert.match(e.sink, /object-access\(fetchRecord\)/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire when the reader enforces ownership (owner check present)", () => {
+    const dir = scratch({
+      "safe.js":
+        "const items = {}; let n = 0;\n" +
+        "function createItem(ctx, data){ const id = 'i' + (++n); items[id] = { owner: ctx.identity, data }; return { id }; }\n" +
+        "function getItem(ctx, id){ const it = items[id]; if (!it) throw new Error('missing'); if (it.owner !== ctx.identity) throw new Error('forbidden: not owner'); return { id, data: it.data }; }\n" +
+        "module.exports.createItem = createItem;\nmodule.exports.getItem = getItem;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["safe.js"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "broken-object-access").length, 0, "an ownership-checked reader must not fire");
+      assert.ok(r.lanes.some((l) => l.attackClass === "broken-object-access" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+const NOAUTH_FIXTURE = join(ROOT, "fixtures", "missing-authentication-node");
+
+describe("raeuberkrebs missing-authentication gate (webhook/ingress — CWE-306/290)", () => {
+  it("fires on a webhook that dispatches without a signature check (unauthenticated-action)", () => {
+    const r = runRedteam(NOAUTH_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "missing-authentication");
+    assert.ok(e, "expected a missing-authentication exploit");
+    assert.equal(e.proof, "unauthenticated-action");
+    assert.match(e.sink, /ingress\(handleWebhook\)/);
+  });
+
+  it("fires on NOVEL ingress code — onUpdate dispatches with no auth (generalizes)", () => {
+    const dir = scratch({
+      "bot.js":
+        "const store = {};\n" +
+        "function applyConfig(c){ store.cfg = c; return { applied: c }; }\n" +
+        "function onUpdate(update){ const cmd = update && update.message && update.message.text; return applyConfig(cmd); }\n" +
+        "module.exports.onUpdate = onUpdate;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["bot.js"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find((x) => x.attackClass === "missing-authentication");
+      assert.ok(e, "expected a missing-authentication exploit on novel ingress code");
+      assert.match(e.sink, /ingress\(onUpdate\)/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire when the handler verifies the request signature", () => {
+    const dir = scratch({
+      "secure.js":
+        "function verifySignature(req){ const s = req.headers && req.headers['x-signature']; return s === 'valid-sig'; }\n" +
+        "function dispatch(cmd){ return { done: cmd }; }\n" +
+        "function onWebhook(req){ if (!verifySignature(req)) throw new Error('unauthorized: bad signature'); return dispatch(req.body && req.body.action); }\n" +
+        "module.exports.onWebhook = onWebhook;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["secure.js"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "missing-authentication").length, 0, "a signature-verified handler must not fire");
+      assert.ok(r.lanes.some((l) => l.attackClass === "missing-authentication" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+const REDOS_FIXTURE = join(ROOT, "fixtures", "resource-exhaustion-node");
+
+describe("raeuberkrebs resource-exhaustion gate (ReDoS — CWE-400/1333)", () => {
+  it("fires on a catastrophic-backtracking regex applied to input (input-caused-hang)", () => {
+    const r = runRedteam(REDOS_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "resource-exhaustion");
+    assert.ok(e, "expected a resource-exhaustion exploit");
+    assert.equal(e.proof, "input-caused-hang");
+    assert.equal(e.sink, "catastrophic-regex");
+  });
+
+  it("fires on NOVEL ReDoS code — a different nested-quantifier regex (generalizes)", () => {
+    const dir = scratch({
+      "email.js":
+        "function isEmail(s){ return /^([a-zA-Z0-9]+)*@example\\.com$/.test(s); }\n" +
+        "module.exports.isEmail = isEmail;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["email.js"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      assert.ok(r.exploits.some((x) => x.attackClass === "resource-exhaustion"), "expected a ReDoS exploit on novel code");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire on a linear (safe) regex — no catastrophic backtracking", () => {
+    const dir = scratch({
+      "slug.js":
+        "function isSlug(s){ return /^[a-z0-9-]+$/.test(s); }\n" +
+        "module.exports.isSlug = isSlug;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["slug.js"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "resource-exhaustion").length, 0, "a linear regex must not fire");
+      assert.ok(r.lanes.some((l) => l.attackClass === "resource-exhaustion" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+const PROTO_FIXTURE = join(ROOT, "fixtures", "prototype-pollution-node");
+
+describe("raeuberkrebs prototype-pollution gate (CWE-1321)", () => {
+  it("fires on a recursive merge with no __proto__ guard (prototype-polluted)", () => {
+    const r = runRedteam(PROTO_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "prototype-pollution");
+    assert.ok(e, "expected a prototype-pollution exploit");
+    assert.equal(e.proof, "prototype-polluted");
+    assert.match(e.sink, /merge-sink\(deepMerge\)/);
+  });
+
+  it("fires on NOVEL code — a path-set helper (setPath) via __proto__.x (generalizes)", () => {
+    const dir = scratch({
+      "conf.js":
+        "function setPath(obj, path, val){ const keys = Array.isArray(path) ? path : String(path).split('.'); let o = obj; for (let i = 0; i < keys.length - 1; i++){ const k = keys[i]; if (o[k] == null || typeof o[k] !== 'object') o[k] = {}; o = o[k]; } o[keys[keys.length - 1]] = val; return obj; }\n" +
+        "module.exports.setPath = setPath;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["conf.js"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      assert.ok(r.exploits.some((x) => x.attackClass === "prototype-pollution"), "expected a pollution exploit on the path-set helper");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire when the merge skips __proto__/constructor/prototype", () => {
+    const dir = scratch({
+      "safe.js":
+        "function safeMerge(target, src){ for (const key in src){ if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue; const v = src[key]; if (v && typeof v === 'object' && target[key] && typeof target[key] === 'object') safeMerge(target[key], v); else target[key] = v; } return target; }\n" +
+        "module.exports.safeMerge = safeMerge;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["safe.js"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "prototype-pollution").length, 0, "a key-guarded merge must not pollute");
+      assert.ok(r.lanes.some((l) => l.attackClass === "prototype-pollution" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+const ZIPSLIP_FIXTURE = join(ROOT, "fixtures", "zip-slip-node");
+
+describe("raeuberkrebs zip-slip gate (archive extraction path traversal — CWE-22)", () => {
+  it("fires when an extractor writes a ../ entry outside the target dir (extraction-escaped)", () => {
+    const r = runRedteam(ZIPSLIP_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "zip-slip");
+    assert.ok(e, "expected a zip-slip exploit");
+    assert.equal(e.proof, "extraction-escaped");
+    assert.match(e.sink, /archive-extract\(extractEntries\)/);
+  });
+
+  it("fires on NOVEL code — a differently-named unpack helper (generalizes)", () => {
+    const dir = scratch({
+      "unpack.js":
+        "const fs = require('fs'); const path = require('path');\n" +
+        "function unpackArchive(entries, dir){ fs.mkdirSync(dir, { recursive: true }); for (const e of entries){ const d = path.join(dir, e.path); fs.mkdirSync(path.dirname(d), { recursive: true }); fs.writeFileSync(d, e.content); } }\n" +
+        "module.exports.unpackArchive = unpackArchive;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["unpack.js"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      assert.ok(r.exploits.some((x) => x.attackClass === "zip-slip"), "expected a zip-slip exploit on novel extractor");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire when the extractor containment-checks each entry", () => {
+    const dir = scratch({
+      "safe.js":
+        "const fs = require('fs'); const path = require('path');\n" +
+        "function extractSafe(entries, dir){ const root = path.resolve(dir); fs.mkdirSync(root, { recursive: true }); for (const e of entries){ const d = path.resolve(root, e.name); if (d !== root && !d.startsWith(root + path.sep)) throw new Error('blocked: ' + e.name); fs.mkdirSync(path.dirname(d), { recursive: true }); fs.writeFileSync(d, e.data); } }\n" +
+        "module.exports.extractSafe = extractSafe;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["safe.js"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "zip-slip").length, 0, "a containment-checked extractor must not escape");
+      assert.ok(r.lanes.some((l) => l.attackClass === "zip-slip" && l.live));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

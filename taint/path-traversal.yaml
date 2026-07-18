@@ -1,0 +1,41 @@
+# raeuberkrebs — path-traversal guard-consistency (#16).
+# fs read/write/stream whose path is built with path.join/resolve (base + segment) and is NOT wrapped
+# in a project path-containment guard. Narrows the density heuristic (26 openclaw sinks, all contained)
+# to the guard-bypass signal. Structural because the tainted segment is usually an exported-fn param /
+# CLI arg. raeuberkrebs PROVES by driving the entrypoint with "../../decoy".
+rules:
+  - id: raeuber-path-traversal-unguarded-joined-fs
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: >-
+      fs read/write on a path.join/resolve path with no containment guard (normalizeRelativePath /
+      safeRealpath / containerJoin). If a joined segment is remote-controlled, "../" escapes the base.
+      raeuberkrebs candidate — prove by driving the entrypoint with "../../decoy".
+    patterns:
+      - pattern-either:
+          - pattern: $FS.readFile($J, ...)
+          - pattern: $FS.readFileSync($J, ...)
+          - pattern: readFile($J, ...)
+          - pattern: readFileSync($J, ...)
+          - pattern: $FS.writeFile($J, ...)
+          - pattern: writeFileSync($J, ...)
+          - pattern: createReadStream($J, ...)
+          - pattern: createWriteStream($J, ...)
+      - metavariable-pattern:
+          metavariable: $J
+          patterns:
+            - pattern-either:
+                - pattern: path.join(...)
+                - pattern: path.resolve(...)
+      - pattern-not-inside: |
+          function $F(...) {
+            ...
+            normalizeRelativePath(...)
+            ...
+          }
+      - pattern-not-inside: |
+          function $F(...) {
+            ...
+            safeRealpath(...)
+            ...
+          }

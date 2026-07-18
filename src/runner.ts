@@ -8,6 +8,12 @@ import { PathTraversalAttacker } from "./attackers/path-traversal.js";
 import { SsrfSwiftAttacker } from "./attackers/ssrf-swift.js";
 import { SsrfAttacker } from "./attackers/ssrf.js";
 import { CsvInjectionAttacker } from "./attackers/csv-injection.js";
+import { BrokenAccessControlAttacker } from "./attackers/broken-access-control.js";
+import { BrokenObjectAccessAttacker } from "./attackers/broken-object-access.js";
+import { MissingAuthenticationAttacker } from "./attackers/missing-authentication.js";
+import { ResourceExhaustionAttacker } from "./attackers/resource-exhaustion.js";
+import { PrototypePollutionAttacker } from "./attackers/prototype-pollution.js";
+import { ZipSlipAttacker } from "./attackers/zip-slip.js";
 import type { Exploit, LaneStatus, RaeuberResult, Verdict } from "./types.js";
 
 /** The registered attack lanes (Node). */
@@ -19,6 +25,14 @@ export const ATTACKERS: Attacker[] = [
   new SsrfSwiftAttacker(),
   new SsrfAttacker(),
   new CsvInjectionAttacker(),
+  // Chunk-1 backfill lanes (Node): differential-authz, IDOR, ingress-auth, ReDoS, prototype
+  // pollution, and archive zip-slip — each drive-and-prove with a planted fixture.
+  new BrokenAccessControlAttacker(),
+  new BrokenObjectAccessAttacker(),
+  new MissingAuthenticationAttacker(),
+  new ResourceExhaustionAttacker(),
+  new PrototypePollutionAttacker(),
+  new ZipSlipAttacker(),
 ];
 
 function verdictFrom(lanes: LaneStatus[], exploits: Exploit[]): Verdict {

@@ -22,6 +22,8 @@ const SKIP_RE =
 const SANITIZER_SIGNALS: Partial<Record<AttackClass, RegExp>> = {
   ssrf: /\bssrf\b|ssrfPolicy|ssrfGuard|isPrivate(?:Host|Ip|Address)|blocked?Hosts?|denyHost|allow-?list|allowedHosts?|assertPublic|safeFetch|guardedFetch|validateUrl|isAllowedUrl|resolvePublicUrl/i,
   "path-traversal": /isPathInside|sanitize(?:Path|Filename)|assertWithin|containsTraversal|resolveWithin|safeJoin|isSubPath/i,
+  "missing-authentication": /Authenticat|Authoriz|VerifySignature|ValidateToken|\bbearer\b|apiKey|requireAuth|\bhmac\b|signatureValid/i,
+  "broken-object-access": /OwnerId|ownedBy|IsOwner|belongsTo|\bprincipal\b|CheckOwnership|assertOwn|scopedTo/i,
 };
 
 export interface SweepLead {

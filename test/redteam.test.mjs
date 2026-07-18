@@ -81,6 +81,70 @@ describe("raeuberkrebs command-injection gate", () => {
   });
 });
 
+const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
+
+describe("raeuberkrebs command-injection gate (Swift lane)", () => {
+  it("fires on the planted Swift fixture — an injected echo executes (marker-executed)", () => {
+    const r = runRedteam(SWIFT_FIXTURE, ["vuln.swift"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    assert.equal(r.exploits.length, 1);
+    const e = r.exploits[0];
+    assert.equal(e.attackClass, "command-injection");
+    assert.equal(e.proof, "marker-executed");
+    assert.match(e.evidence, /RAEUBER_[0-9a-f]+/); // the executed marker is the evidence
+    assert.ok(e.payload.includes("echo RAEUBER_"));
+  });
+
+  it("fires on NOVEL vulnerable Swift, not just the fixture (generalizes)", () => {
+    const dir = scratch({
+      "app.swift": [
+        "import Foundation",
+        "func run(_ cmd: String) -> String {",
+        '  let p = Process()',
+        '  p.executableURL = URL(fileURLWithPath: "/bin/bash")',
+        '  p.arguments = ["-c", "ls \\(cmd)"]',
+        "  let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe",
+        "  try? p.run(); p.waitUntilExit()",
+        "  let d = pipe.fileHandleForReading.readDataToEndOfFile()",
+        '  return String(data: d, encoding: .utf8) ?? ""',
+        "}",
+      ].join("\n"),
+    });
+    try {
+      const r = runRedteam(dir, ["app.swift"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      assert.equal(r.exploits[0].file, "app.swift");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire on a safe array-arg Process (no false positive)", () => {
+    const dir = scratch({
+      "safe.swift": [
+        "import Foundation",
+        "func ping(_ host: String) -> String {",
+        "  let p = Process()",
+        '  p.executableURL = URL(fileURLWithPath: "/bin/echo")',
+        '  p.arguments = ["pinging", host]',
+        "  let pipe = Pipe(); p.standardOutput = pipe",
+        "  try? p.run(); p.waitUntilExit()",
+        "  let d = pipe.fileHandleForReading.readDataToEndOfFile()",
+        '  return String(data: d, encoding: .utf8) ?? ""',
+        "}",
+      ].join("\n"),
+    });
+    try {
+      const r = runRedteam(dir, ["safe.swift"], LOCAL);
+      assert.equal(r.exploits.length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+      assert.ok(r.lanes.some((l) => l.attackClass === "command-injection" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const PT_FIXTURE = join(ROOT, "fixtures", "path-traversal-node");
 
 describe("raeuberkrebs path-traversal gate", () => {

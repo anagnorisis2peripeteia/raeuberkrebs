@@ -32,6 +32,10 @@ const SANITIZER_SIGNALS: Partial<Record<AttackClass, RegExp>> = {
   xxe: /DtdProcessing\.(?:Prohibit|Ignore)|XmlResolver\s*=\s*null|XmlSecureResolver/i,
   "zip-slip": /GetFullPath|IsPathWithinRoot|IsWithin\b|StartsWith\s*\([^)]*(?:root|dest|target|extract|base)/i,
   "webview-injection": /JsonSerializer\.Serialize|JavaScriptStringEncode|HtmlEncode|EscapeDataString|JsonEncodedText|Encodings\.Web|SanitizeHtml/i,
+  // Round-3: weak-random's fix is the crypto RNG; argument-injection's is the arg list. (TOCTOU has
+  // no clean single-token guard — atomic handles / O_EXCL — so it gets no signal.)
+  "weak-random": /RandomNumberGenerator|RNGCryptoServiceProvider|GetNonZeroBytes/i,
+  "argument-injection": /ArgumentList\b/i,
 };
 
 export interface SweepLead {

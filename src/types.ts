@@ -20,7 +20,13 @@ export type AttackClass =
   | "unsafe-deserialization" // untrusted bytes into pickle/yaml.load/native deserialize
   | "ssrf" // untrusted input controls an outbound request target
   | "unsafe-exec" // untrusted input into eval / new Function / dynamic import
-  | "csv-injection"; // untrusted input reaches a CSV/spreadsheet cell without formula-prefix neutralization
+  | "csv-injection" // untrusted input reaches a CSV/spreadsheet cell without formula-prefix neutralization
+  | "broken-access-control" // a privileged effect is reachable through a path guarded WEAKER than a sibling reaching the same effect (CWE-863/862/269 — differential authorization)
+  | "broken-object-access" // a resource is reachable by a caller-controlled key with no ownership check — one principal reads/mutates another's object (CWE-639/CWE-284 — IDOR/BOLA)
+  | "missing-authentication" // an inbound/webhook handler performs a privileged action without authenticating the sender or verifying the request signature (CWE-306/CWE-290 — missing auth / spoofing)
+  | "resource-exhaustion" // untrusted input reaches a catastrophic-backtracking regex or an unbounded op — a crafted input hangs/OOMs the process (CWE-400/CWE-1333 — ReDoS / uncontrolled resource consumption)
+  | "prototype-pollution" // untrusted keys reach a recursive merge/set that writes through `__proto__`/`constructor.prototype`, polluting Object.prototype for every object (CWE-1321)
+  | "zip-slip"; // an archive entry with a `../` path is written outside the extraction directory — extraction with no path-containment check (CWE-22 archive variant)
 
 export const ATTACK_CLASSES: AttackClass[] = [
   "command-injection",
@@ -30,6 +36,7 @@ export const ATTACK_CLASSES: AttackClass[] = [
   "ssrf",
   "unsafe-exec",
   "csv-injection",
+  "broken-access-control",
 ];
 
 /** Terminal verdicts, most-benign first. Only `clean` exits 0. */
@@ -58,7 +65,34 @@ export type ExploitProof =
   // with a formula trigger (= + - @) — un-neutralized, so it would execute in a spreadsheet. The
   // payload never runs in OUR sandbox (it fires in the victim's Excel/Sheets), so the proof is that it
   // SURVIVED into the output unescaped, not that it executed.
-  | "formula-unescaped";
+  | "formula-unescaped"
+  // A privileged EFFECT executed through an entrypoint holding a credential that a SIBLING entrypoint
+  // reaching the same effect REJECTS. Like `formula-unescaped`, the proof is differential/observed,
+  // not a single injected marker: both entrypoints are executed under the identical low-privilege
+  // context, and the fire is that the weak path ran the effect while the strong path denied the same
+  // caller with an authorization error — an authority a real caller could exploit to escalate.
+  | "privilege-escalated"
+  // Principal B read (or mutated) a resource created/owned by principal A, through an entrypoint that
+  // resolves the resource from a CALLER-CONTROLLED key without an ownership check. Proven differentially:
+  // create a resource as identity A carrying a marker, then reach it as a different identity B — fired
+  // means B got A's marker back (IDOR / broken object-level authorization).
+  | "foreign-object-accessed"
+  // A FORGED inbound request — no valid signature / unauthenticated sender — carrying a benign marker
+  // action was ACCEPTED and processed by an ingress handler that reaches a privileged action. Fired
+  // means the handler acted on the marker without ever authenticating the request (CWE-306/CWE-290).
+  | "unauthenticated-action"
+  // A crafted (benign, short) input drove the entrypoint into catastrophic backtracking / an unbounded
+  // loop so the call HUNG past the time budget, while a normal input returned fast. The proof is the
+  // observed hang differential — availability compromise a single small request can trigger (ReDoS).
+  | "input-caused-hang"
+  // A payload carrying a `__proto__`/`constructor.prototype` key was merged/assigned into a target, and
+  // afterwards a FRESH, unrelated `{}` carried the injected property — proof that `Object.prototype`
+  // itself was polluted (every object in the process is now affected). Global-state compromise.
+  | "prototype-polluted"
+  // An archive entry whose path contains `../` was extracted, and a file with the planted marker
+  // appeared OUTSIDE the extraction directory — proof the extractor writes entry paths without a
+  // containment check, so an archive can drop files anywhere the process can write (CWE-22 / Zip Slip).
+  | "extraction-escaped";
 
 /**
  * A PROVEN exploit: an adversarial payload that was executed against the changed surface in the

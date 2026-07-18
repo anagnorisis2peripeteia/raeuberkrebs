@@ -36,6 +36,15 @@ no host FS); a reduced-isolation local copy is the fallback when crabbox isn't p
   no false positive on safe array-arg `execFile`.
 - Primitives: the crabbox/local sandbox with a `writeFile` PoC-drop, git-diff scoping, the
   fail-closed result model, canary-liveness in the runner, the CLI gate.
+- Lane: **command-injection (.NET / C#)** — the first non-Node lane. C# is compiled, so instead of
+  `import()`-ing an entrypoint it parses the changed file for a public `string`-first-arg method,
+  compiles that one file + a generated driver into an **isolated single-file console project**, then
+  runs the driver once per payload and proves via the executed marker (`fixtures/command-injection-dotnet`
+  is its planted canary; validated LIVE on the local sandbox with .NET SDK 10). **Boundary:** a file
+  that needs the rest of its project (or WPF/Windows types) to compile won't build in isolation, so it
+  is driven but cannot fire — an honest miss, never a false pass. Driving those requires the planned
+  **project-build + reflection-invoke** driver (compile the real `.csproj`, `LoadFrom` + invoke the
+  public method reaching the sink), run on a box whose SDK builds the target's framework.
 
 **Next (per `project_raeuberkrebs` memory):** more lanes + languages (SQLi, path-traversal,
 deserialization, SSRF, unsafe-exec) · the diff-gate polish + `validate:attacker` canary script ·

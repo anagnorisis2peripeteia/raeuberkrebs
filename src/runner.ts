@@ -2,17 +2,56 @@ import { readdirSync } from "node:fs";
 import { openSandbox, type SandboxOptions } from "./sandbox.js";
 import type { Attacker } from "./attackers/attacker.js";
 import { CommandInjectionAttacker } from "./attackers/command-injection.js";
+import { CommandInjectionDotnetAttacker } from "./attackers/command-injection-dotnet.js";
+import { CommandInjectionSwiftAttacker } from "./attackers/command-injection-swift.js";
 import { PathTraversalAttacker } from "./attackers/path-traversal.js";
 import { SsrfAttacker } from "./attackers/ssrf.js";
 import { CsvInjectionAttacker } from "./attackers/csv-injection.js";
+import { BrokenAccessControlAttacker } from "./attackers/broken-access-control.js";
+import { BrokenObjectAccessAttacker } from "./attackers/broken-object-access.js";
+import { MissingAuthenticationAttacker } from "./attackers/missing-authentication.js";
+import { ResourceExhaustionAttacker } from "./attackers/resource-exhaustion.js";
+import { PrototypePollutionAttacker } from "./attackers/prototype-pollution.js";
+import { ZipSlipAttacker } from "./attackers/zip-slip.js";
+import { SsrfDotnetAttacker } from "./attackers/ssrf-dotnet.js";
+import { PathTraversalDotnetAttacker } from "./attackers/path-traversal-dotnet.js";
+import { UnsafeDeserializationDotnetAttacker } from "./attackers/unsafe-deserialization-dotnet.js";
+import {
+  MissingAuthenticationDotnetAttacker,
+  ResourceExhaustionDotnetAttacker,
+  UnsafeExecDotnetAttacker,
+  BrokenObjectAccessDotnetAttacker,
+  SqlInjectionDotnetAttacker,
+  CsvInjectionDotnetAttacker,
+} from "./attackers/dotnet-more-lanes.js";
 import type { Exploit, LaneStatus, RaeuberResult, Verdict } from "./types.js";
 
-/** The registered attack lanes (Node). */
+/** The registered attack lanes (Node + .NET). */
 export const ATTACKERS: Attacker[] = [
   new CommandInjectionAttacker(),
+  new CommandInjectionDotnetAttacker(),
+  new CommandInjectionSwiftAttacker(),
   new PathTraversalAttacker(),
   new SsrfAttacker(),
   new CsvInjectionAttacker(),
+  new BrokenAccessControlAttacker(),
+  new BrokenObjectAccessAttacker(),
+  new MissingAuthenticationAttacker(),
+  new ResourceExhaustionAttacker(),
+  new PrototypePollutionAttacker(),
+  new ZipSlipAttacker(),
+  // C# (.NET) static lanes — feed the sweep's guard-consistency signal for the Windows node; the
+  // execute-gate skips them (staticOnly), so proof is per-lead. Command-injection has its own
+  // drive-and-prove .NET lane above (CommandInjectionDotnetAttacker).
+  new SsrfDotnetAttacker(),
+  new PathTraversalDotnetAttacker(),
+  new UnsafeDeserializationDotnetAttacker(),
+  MissingAuthenticationDotnetAttacker,
+  ResourceExhaustionDotnetAttacker,
+  UnsafeExecDotnetAttacker,
+  BrokenObjectAccessDotnetAttacker,
+  SqlInjectionDotnetAttacker,
+  CsvInjectionDotnetAttacker,
 ];
 
 function verdictFrom(lanes: LaneStatus[], exploits: Exploit[]): Verdict {
@@ -77,7 +116,9 @@ export function runRedteam(
   const exploits: Exploit[] = [];
   let sandboxName = "none";
 
-  const applicable = ATTACKERS.filter((a) => changedFiles.some((f) => a.handles(f)));
+  const applicable = ATTACKERS.filter(
+    (a) => !a.staticOnly && changedFiles.some((f) => a.handles(f)),
+  );
   if (applicable.length === 0) {
     return {
       verdict: "clean",

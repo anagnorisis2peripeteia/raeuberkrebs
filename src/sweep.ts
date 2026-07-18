@@ -10,7 +10,7 @@ import type { AttackClass } from "./types.js";
 // prove phase, never a finding. This is the cost control the crabbox lesson demands: the
 // deterministic sweep is free, so the LLM+sandbox fan-out only ever touches the density head.
 
-const SOURCE_EXTS = ["ts", "mts", "cts", "js", "cjs", "mjs"];
+const SOURCE_EXTS = ["ts", "mts", "cts", "js", "cjs", "mjs", "cs", "swift"];
 // Exclude tests/fixtures/build output/vendored code — same spirit as the gate's scope.
 const SKIP_RE =
   /(\.test\.|\.spec\.|-harness\.|(^|\/)test-support\/|(^|\/)tests?\/|(^|\/)__tests__\/|(^|\/)e2e\/|(^|\/)fixtures?\/|(^|\/)scripts?\/|(^|\/)dist\/|(^|\/)build\/|(^|\/)node_modules\/|(^|\/)\.git\/|(^|\/)\.agents\/|\.d\.ts$)/;
@@ -20,8 +20,11 @@ const SKIP_RE =
 // guard in 155 files); the bug is the sink site whose file doesn't reference one. Per-file heuristic
 // — coarse (a guard reached via a cross-file wrapper is missed); full inter-procedural taint is #16.
 const SANITIZER_SIGNALS: Partial<Record<AttackClass, RegExp>> = {
-  ssrf: /\bssrf\b|ssrfPolicy|ssrfGuard|isPrivate(?:Host|Ip|Address)|blocked?Hosts?|denyHost|allow-?list|allowedHosts?|assertPublic|safeFetch|guardedFetch|validateUrl|isAllowedUrl|resolvePublicUrl/i,
-  "path-traversal": /isPathInside|sanitize(?:Path|Filename)|assertWithin|containsTraversal|resolveWithin|safeJoin|isSubPath/i,
+  // Node + C# guard names (union): a file referencing any of these is treated as guarding the class.
+  ssrf: /\bssrf\b|ssrfPolicy|ssrfGuard|isPrivate(?:Host|Ip|Address)|blocked?Hosts?|denyHost|allow-?list|allowedHosts?|assertPublic|safeFetch|guardedFetch|validateUrl|isAllowedUrl|resolvePublicUrl|IsPrivateOrLoopback|HttpUrlRiskEvaluator|HttpUrlValidator|IsUrlSafe|DangerousUrlPattern|CanvasUrlSafety|BuildSafeHandler|hostAllowlist/i,
+  "path-traversal": /isPathInside|sanitize(?:Path|Filename)|assertWithin|containsTraversal|resolveWithin|safeJoin|isSubPath|IsPathWithinRoot|GetFinalPathFromHandle|ResolveLinkTarget|writeExternalFileWithinRoot|GetFullPath|IsWithin/i,
+  "missing-authentication": /Authenticat|Authoriz|VerifySignature|ValidateToken|\bbearer\b|apiKey|IsAuthenticated|CheckToken|requireAuth|\bhmac\b|McpAuthToken|BearerToken|signatureValid|ConstantTimeEquals|FixedTimeEquals/i,
+  "broken-object-access": /OwnerId|ownedBy|IsOwner|belongsTo|\bprincipal\b|CheckOwnership|assertOwn|IsAuthorizedFor|scopedTo|AccessControl|RequireScope|EnsureApproved/i,
 };
 
 export interface SweepLead {
@@ -108,6 +111,9 @@ export function sweepRepo(repo: string, opts: { top?: number } = {}): SweepRepor
       if (SANITIZER_SIGNALS[lane]!.test(src)) guarded.add(lane);
     }
     for (const attacker of ATTACKERS) {
+      // Language-partition: a lane only scans files it handles (C# lanes → .cs, Node lanes → .ts/.js),
+      // so a JS sink pattern never fires on a .cs file and vice versa.
+      if (!attacker.handles(rel)) continue;
       const hasSignal = Boolean(SANITIZER_SIGNALS[attacker.attackClass]);
       for (const lead of attacker.staticLeads(src)) {
         leads.push({

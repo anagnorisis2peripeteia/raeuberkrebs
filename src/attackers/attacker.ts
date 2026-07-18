@@ -25,6 +25,11 @@ export interface StaticLead {
 
 export interface Attacker {
   readonly attackClass: AttackClass;
+  /** A static-only lane: it contributes `staticLeads` to the free sweep but has no execute-driven
+   *  `hunt` proof (e.g. the C# lanes, where driving a compiled entrypoint per sink doesn't scale, so
+   *  a lead is proven per-lead instead). The execute-gate (`runRedteam`) skips these; the sweep uses
+   *  their leads. Absent/false = a normal drive-and-prove lane. */
+  readonly staticOnly?: boolean;
   /** True if this lane can attack the given changed file (by language/extension). */
   handles(file: string): boolean;
   /** Absolute path to the planted-vulnerable fixture dir the canary attacks to prove liveness. */

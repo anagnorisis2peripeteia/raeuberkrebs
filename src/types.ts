@@ -26,7 +26,12 @@ export type AttackClass =
   | "missing-authentication" // an inbound/webhook handler performs a privileged action without authenticating the sender or verifying the request signature (CWE-306/CWE-290 — missing auth / spoofing)
   | "resource-exhaustion" // untrusted input reaches a catastrophic-backtracking regex or an unbounded op — a crafted input hangs/OOMs the process (CWE-400/CWE-1333 — ReDoS / uncontrolled resource consumption)
   | "prototype-pollution" // untrusted keys reach a recursive merge/set that writes through `__proto__`/`constructor.prototype`, polluting Object.prototype for every object (CWE-1321)
-  | "zip-slip"; // an archive entry with a `../` path is written outside the extraction directory — extraction with no path-containment check (CWE-22 archive variant)
+  | "zip-slip" // an archive entry with a `../` path is written outside the extraction directory — extraction with no path-containment check (CWE-22 archive variant)
+  | "weak-crypto" // a broken/weak cryptographic primitive is used (MD5/SHA1 for security, DES/TripleDES/RC2, ECB mode, no padding) — collisions/decryption feasible (CWE-327/328/326)
+  | "insecure-tls" // TLS certificate validation is disabled — a custom accept-any-cert callback or revocation turned off makes the node trust any server, enabling MITM (CWE-295)
+  | "xxe" // XML parsed with DTD/external-entity resolution enabled on attacker-supplied XML — file read / SSRF via external entities (CWE-611)
+  | "insecure-temp-file" // a predictable temp path (Path.GetTempFileName / GetTempPath) holds sensitive data — race / symlink / predictable-name attack (CWE-377)
+  | "webview-injection"; // untrusted input is concatenated/interpolated into a WebView ExecuteScriptAsync/NavigateToString call — script/HTML injection into the trusted WebView origin (CWE-79/94)
 
 export const ATTACK_CLASSES: AttackClass[] = [
   "command-injection",
@@ -36,6 +41,7 @@ export const ATTACK_CLASSES: AttackClass[] = [
   "ssrf",
   "unsafe-exec",
   "csv-injection",
+  "broken-access-control",
 ];
 
 /** Terminal verdicts, most-benign first. Only `clean` exits 0. */

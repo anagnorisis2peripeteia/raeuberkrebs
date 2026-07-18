@@ -251,6 +251,48 @@ describe("raeuberkrebs resource-exhaustion gate (Swift lane)", () => {
   });
 });
 
+const SQLI_SWIFT_FIXTURE = join(ROOT, "fixtures", "sql-injection-swift");
+
+describe("raeuberkrebs sql-injection gate (Swift lane)", () => {
+  it("fires on the planted Swift fixture — an OR '1'='1 payload bypasses WHERE (secret-exfiltrated)", () => {
+    const r = runRedteam(SQLI_SWIFT_FIXTURE, ["vuln.swift"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    assert.equal(r.exploits.length, 1);
+    assert.equal(r.exploits[0].attackClass, "sql-injection");
+    assert.equal(r.exploits[0].proof, "secret-exfiltrated");
+  });
+
+  it("does NOT fire on a parameterized query (no false positive)", () => {
+    const dir = scratch({
+      "safe.swift": [
+        "import Foundation",
+        "import SQLite3",
+        "func lookup(_ name: String) -> String {",
+        "  var db: OpaquePointer?",
+        '  sqlite3_open(":memory:", &db)',
+        "  sqlite3_exec(db, \"CREATE TABLE t(name TEXT, val TEXT)\", nil, nil, nil)",
+        "  sqlite3_exec(db, \"INSERT INTO t VALUES('public','ok')\", nil, nil, nil)",
+        "  sqlite3_exec(db, \"INSERT INTO t VALUES('secret','RAEUBER_sqli_row')\", nil, nil, nil)",
+        "  var stmt: OpaquePointer?",
+        "  var out = \"\"",
+        '  if sqlite3_prepare_v2(db, "SELECT val FROM t WHERE name = ?", -1, &stmt, nil) == SQLITE_OK {',
+        "    sqlite3_bind_text(stmt, 1, name, -1, nil)",
+        "    while sqlite3_step(stmt) == SQLITE_ROW { if let c = sqlite3_column_text(stmt, 0) { out += String(cString: c) } }",
+        "  }",
+        "  sqlite3_finalize(stmt); sqlite3_close(db); return out",
+        "}",
+      ].join("\n"),
+    });
+    try {
+      const r = runRedteam(dir, ["safe.swift"], LOCAL);
+      assert.equal(r.exploits.length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const PT_FIXTURE = join(ROOT, "fixtures", "path-traversal-node");
 
 describe("raeuberkrebs path-traversal gate", () => {

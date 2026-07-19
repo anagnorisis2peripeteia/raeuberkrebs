@@ -34,7 +34,12 @@ export type AttackClass =
   | "webview-injection" // untrusted input is concatenated/interpolated into a WebView ExecuteScriptAsync/NavigateToString call — script/HTML injection into the trusted WebView origin (CWE-79/94)
   | "weak-random" // a non-cryptographic RNG (System.Random) generates a security value (token/key/nonce/salt/otp) — predictable / brute-forceable (CWE-330/338)
   | "argument-injection" // untrusted input concatenated into a process ARGUMENT string (ProcessStartInfo.Arguments) rather than an arg list — injects extra flags to the spawned program (CWE-88)
-  | "toctou"; // a File/Directory.Exists check guards a later file op on the same path — the path can change between check and use (symlink race) (CWE-367)
+  | "toctou" // a File/Directory.Exists check guards a later file op on the same path — the path can change between check and use (symlink race) (CWE-367)
+  // A security-DECISION control (approval/allowlist/policy) BELIEVED an input safe/allowed, but running
+  // that input in the sandbox fired the benign marker — the control's belief diverges from its actual
+  // behavior, so it auto-approves something that executes. Found by the differential-oracle primitive
+  // (src/differential-oracle.ts): probe the target's own decision API, diff belief vs ground truth.
+  | "policy-belief-divergence";
 
 export const ATTACK_CLASSES: AttackClass[] = [
   "command-injection",
@@ -100,7 +105,11 @@ export type ExploitProof =
   // An archive entry whose path contains `../` was extracted, and a file with the planted marker
   // appeared OUTSIDE the extraction directory — proof the extractor writes entry paths without a
   // containment check, so an archive can drop files anywhere the process can write (CWE-22 / Zip Slip).
-  | "extraction-escaped";
+  | "extraction-escaped"
+  // A security-decision control returned safe/allowed for an input whose benign marker then EXECUTED
+  // in the sandbox — proof the control's belief diverges from actual behavior (it auto-approves
+  // something that runs). Differential/observed like `privilege-escalated`: belief=safe, marker fires.
+  | "belief-diverged";
 
 /**
  * A PROVEN exploit: an adversarial payload that was executed against the changed surface in the

@@ -27,6 +27,9 @@ export interface StaticLead {
 
 export interface Attacker {
   readonly attackClass: AttackClass;
+  /** Optional language runtime image when the lane needs a non-default crabbox image (for
+   * `openSandbox(..., { crabboxImage })`) — e.g., Python or Go command runners. */
+  readonly sandboxImage?: string;
   /** A static-only lane: it contributes `staticLeads` to the free sweep but has no execute-driven
    *  `hunt` proof (e.g. the C# lanes, where driving a compiled entrypoint per sink doesn't scale, so
    *  a lead is proven per-lead instead). The execute-gate (`runRedteam`) skips these; the sweep uses
@@ -69,6 +72,10 @@ export function freshMarker(): string {
 // single dynamic `import()` loads .ts (types stripped), .mjs/.cjs, and .js alike — see NODE_RUN in
 // the lanes. (.tsx/.jsx are excluded: JSX isn't type-stripped and UI components aren't entrypoints.)
 export const NODE_SOURCE_RE = /\.(?:ts|mts|cts|mjs|js|cjs)$/;
+/** Python source files a Python lane can drive. */
+export const PYTHON_SOURCE_RE = /\.py$/;
+/** Go source files a Go lane can drive. */
+export const GO_SOURCE_RE = /\.go$/;
 
 /** How the lanes invoke a generated .mjs driver: type-stripping on, experimental warning silenced so
  *  it can't pollute the marker evidence. Prefix for `sandbox.exec`. */

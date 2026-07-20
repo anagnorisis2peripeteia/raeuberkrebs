@@ -31,9 +31,13 @@ no host FS); a reduced-isolation local copy is the fallback when crabbox isn't p
 
 ## Status — Chunk 0 (built + verified)
 
-- Lane: **command-injection** (Node `.js/.cjs`), detect exec sinks → drive marker payloads through the
-  exported entrypoint → prove via the executed marker. Fires on the planted fixture + novel code;
-  no false positive on safe array-arg `execFile`.
+- Lane: **command-injection** (Node `.js/.cjs`, Swift `.swift`, Python `.py`, Go `.go`), detect shell
+  sinks (`child_process`, `Process`, `subprocess shell=True`, `os.system`, `exec.Command("sh","-c",...)`)
+  → drive marker payloads through the exported/parsed entrypoint → prove via the executed marker.
+  Fires on the planted fixture + novel code; no false positive on safe non-shell exec paths.
+- Lane: **path-traversal** (Node `.js/.cjs`, Swift `.swift`, Python `.py`, Go `.go`), detect filesystem
+  joins/reads with untrusted components (`path.join`, `filepath.Join`, `String(contentsOfFile:)`,
+  `open(... )`) → prove via marker-secrets read outside base path.
 - Primitives: the crabbox/local sandbox with a `writeFile` PoC-drop, git-diff scoping, the
   fail-closed result model, canary-liveness in the runner, the CLI gate.
 

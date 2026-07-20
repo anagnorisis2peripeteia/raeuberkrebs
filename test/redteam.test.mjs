@@ -13,6 +13,8 @@ import { sweepRepo } from "../dist/sweep.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE = join(ROOT, "fixtures", "command-injection-node");
+const PY_CMD_FIXTURE = join(ROOT, "fixtures", "command-injection-python");
+const GO_CMD_FIXTURE = join(ROOT, "fixtures", "command-injection-go");
 const LOCAL = { sandbox: { prefer: "local" } };
 
 function scratch(files) {
@@ -104,6 +106,96 @@ describe("raeuberkrebs command-injection gate", () => {
       const r = runRedteam(dir, ["notes.txt"], LOCAL);
       assert.equal(r.verdict, "clean");
       assert.equal(r.exploits.length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("raeuberkrebs command-injection gate (Python lane)", () => {
+  const pyFixture = PY_CMD_FIXTURE;
+  it("fires on the planted Python fixture and returns a proven, evidence-bearing PoC", () => {
+    const r = runRedteam(pyFixture, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "command-injection");
+    assert.ok(e, "expected a command-injection exploit");
+    assert.equal(e.proof, "marker-executed");
+    assert.match(e.evidence, /RAEUBER_[0-9a-f]+/);
+    assert.ok(e.payload.includes("echo RAEUBER_"));
+  });
+
+  it("fires on NOVEL vulnerable Python code, not just the fixture", () => {
+    const dir = scratch({
+      "app.py":
+        "import subprocess\n" +
+        'def run(cmd):\n  return subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout\n',
+    });
+    try {
+      const r = runRedteam(dir, ["app.py"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      assert.equal(r.exploits[0].attackClass, "command-injection");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire on non-shell subprocess usage", () => {
+    const dir = scratch({
+      "safe.py":
+        "import subprocess\n" +
+        "def safe(cmd):\n  return subprocess.run(['echo', 'ok'], capture_output=True, text=True).stdout\n",
+    });
+    try {
+      const r = runRedteam(dir, ["safe.py"], LOCAL);
+      assert.equal(r.exploits.length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+      assert.ok(r.lanes.some((l) => l.attackClass === "command-injection" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("raeuberkrebs command-injection gate (Go lane)", () => {
+  const goFixture = GO_CMD_FIXTURE;
+  it("fires on the planted Go fixture and returns a proven, evidence-bearing PoC", () => {
+    const r = runRedteam(goFixture, ["vuln.go"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "command-injection");
+    assert.ok(e, "expected a command-injection exploit");
+    assert.equal(e.proof, "marker-executed");
+    assert.match(e.evidence, /RAEUBER_[0-9a-f]+/);
+    assert.ok(e.payload.includes("echo RAEUBER_"));
+  });
+
+  it("fires on NOVEL vulnerable Go code, not just the fixture", () => {
+    const dir = scratch({
+      "app.go":
+        "package main\n" +
+        'import (\n  "os/exec"\n)\n\n' +
+        "func run(payload string) string {\n  out,_ := exec.Command(\"sh\", \"-c\", payload).CombinedOutput()\n  return string(out)\n}\n",
+    });
+    try {
+      const r = runRedteam(dir, ["app.go"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      assert.equal(r.exploits[0].attackClass, "command-injection");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire on non-shell command construction", () => {
+    const dir = scratch({
+      "safe.go":
+        "package main\n" +
+        'import "os/exec"\n\n' +
+        "func safe() string {\n  out,_ := exec.Command(\"echo\", \"ok\").CombinedOutput()\n  return string(out)\n}\n",
+    });
+    try {
+      const r = runRedteam(dir, ["safe.go"], LOCAL);
+      assert.equal(r.exploits.length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+      assert.ok(r.lanes.some((l) => l.attackClass === "command-injection" && l.live));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -515,6 +607,8 @@ describe("raeuberkrebs csv-injection gate (Swift lane)", () => {
 });
 
 const PT_FIXTURE = join(ROOT, "fixtures", "path-traversal-node");
+const PY_PT_FIXTURE = join(ROOT, "fixtures", "path-traversal-python");
+const GO_PT_FIXTURE = join(ROOT, "fixtures", "path-traversal-go");
 const PT_BOUNDARY_FIXTURE = join(ROOT, "fixtures", "path-traversal-boundary-node");
 
 describe("raeuberkrebs path-traversal gate", () => {
@@ -544,6 +638,94 @@ describe("raeuberkrebs path-traversal gate", () => {
       assert.equal(r.exploits.length, 0, "containment guard must defeat the ../ attack");
       assert.notEqual(r.verdict, "vulnerable");
       assert.ok(r.lanes.some((l) => l.attackClass === "path-traversal" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("raeuberkrebs path-traversal gate (Python lane)", () => {
+  const pyPtFixture = PY_PT_FIXTURE;
+  it("fires on the planted Python fixture — reads a decoy via ../ (secret-exfiltrated)", () => {
+    const r = runRedteam(pyPtFixture, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "path-traversal");
+    assert.ok(e, "expected a path-traversal exploit");
+    assert.equal(e.proof, "secret-exfiltrated");
+    assert.ok(e.payload.includes("../"));
+    assert.match(e.evidence, /_PT_SECRET/);
+  });
+
+  it("fires on NOVEL vulnerable Python code, not just the fixture", () => {
+    const dir = scratch({
+      "app.py":
+        "import os\n" +
+        "def read(name):\n  return open(os.path.join('public', name)).read()\n",
+    });
+    try {
+      const r = runRedteam(dir, ["app.py"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find((x) => x.attackClass === "path-traversal");
+      assert.ok(e, "expected a path-traversal exploit");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire on fixed-file reads", () => {
+    const dir = scratch({
+      "safe.py": 'def read(name):\n  return open("/etc/hostname").read()\n',
+    });
+    try {
+      const r = runRedteam(dir, ["safe.py"], LOCAL);
+      assert.equal(r.exploits.length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("raeuberkrebs path-traversal gate (Go lane)", () => {
+  const goPtFixture = GO_PT_FIXTURE;
+  it("fires on the planted Go fixture — reads a decoy via ../ (secret-exfiltrated)", () => {
+    const r = runRedteam(goPtFixture, ["vuln.go"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "path-traversal");
+    assert.ok(e, "expected a path-traversal exploit");
+    assert.equal(e.proof, "secret-exfiltrated");
+    assert.ok(e.payload.includes("../"));
+    assert.match(e.evidence, /_PT_SECRET/);
+  });
+
+  it("fires on NOVEL vulnerable Go code, not just the fixture", () => {
+    const dir = scratch({
+      "app.go":
+        "package main\n" +
+        "import (\n  \"os\"\n  \"path/filepath\"\n)\n\n" +
+        "func read(name string) string {\n  b,_ := os.ReadFile(filepath.Join(\"public\", name))\n  return string(b)\n}\n",
+    });
+    try {
+      const r = runRedteam(dir, ["app.go"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find((x) => x.attackClass === "path-traversal");
+      assert.ok(e, "expected a path-traversal exploit");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire on fixed-path reads", () => {
+    const dir = scratch({
+      "safe.go":
+        "package main\n" +
+        "import \"os\"\n\n" +
+        "func safe(name string) string {\n  b,_ := os.ReadFile(\"/etc/hostname\")\n  return string(b)\n}\n",
+    });
+    try {
+      const r = runRedteam(dir, ["safe.go"], LOCAL);
+      assert.equal(r.exploits.length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

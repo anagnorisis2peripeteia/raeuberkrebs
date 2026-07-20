@@ -108,15 +108,17 @@ function contexts() {
   ];
 }
 const ACTION_PAYLOADS = [
-  { marker: MARKER, action: MARKER, command: MARKER, data: MARKER, endpoint: "https://edge.example/allowed", tool: "shell", approved: true, value: MARKER },
+  { marker: MARKER, action: MARKER, command: MARKER, data: MARKER, endpoint: "https://edge.example/allowed", tool: "shell", approved: false, value: MARKER },
   { marker: MARKER, action: MARKER, command: MARKER, tool: "shell", approved: false, endpoint: "https://evil.example/attack", value: MARKER },
-  { marker: MARKER, action: MARKER, payload: { action: MARKER, marker: MARKER }, tool: "shell", approved: MARKER },
+  { marker: MARKER, action: MARKER, payload: { action: MARKER, marker: MARKER }, command: MARKER, tool: "shell", approved: MARKER },
 ];
 const MUTATOR_PAYLOADS = [
   { approvalMode: "off" },
+  { approvalMode: "optional" },
   { approvalRequired: false },
+  { approvalMode: "optional", approvalRequired: false, allowedTools: ["*"], endpointRoots: ["https://"], inheritEnv: false },
   { allowlist: ["*"], allowedTools: ["*"], endpointRoots: ["https://"], inheritEnv: true },
-  { tools: { exec: true, shell: true, run: true }, policyMode: "open", allowAll: true },
+  { tools: { exec: true, shell: true, run: true }, allowedTools: ["*"], policyMode: "open", allowAll: true, approvalRequired: false },
 ];
 
 async function actionAttempts(payload, ctx) {
@@ -142,13 +144,16 @@ function mutatorAttempts(payload, ctx) {
 let fired = false;
 const before = snapshot();
 for (const ctx of contexts()) {
-  let blocked = false;
+  let baselineAllows = false;
   for (const payload of ACTION_PAYLOADS) {
     const baseline = await call(act, await actionAttempts(payload, ctx));
-    if (baseline.ok && hasMarker(baseline.ret)) { process.stdout.write("no-control-plane"); process.exit(0); }
-    if (baseline.authzErr) blocked = true;
+    if (baseline.ok && hasMarker(baseline.ret)) {
+      baselineAllows = true;
+      break;
+    }
   }
-  if (!blocked) continue;
+  if (baselineAllows) continue;
+
   for (const patch of MUTATOR_PAYLOADS) {
     const mutRes = await call(mut, mutatorAttempts(patch, ctx));
     if (!mutRes.ok) continue;

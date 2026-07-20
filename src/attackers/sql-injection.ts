@@ -16,8 +16,11 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // SQL-injection sinks where a query string is assembled from attacker input.
-const SQL_SINK_RE =
+const SQL_DIRECT_SINK_RE =
   /\b(?:\.?(?:query|execute|run|all|get|prepare|raw)|\bknex\.raw|\bsequelize\.query)\s*\([^;)]*(?:`[^`]*\$\{|['"][^"']*['"]\s*\+|[A-Za-z_$][\w$]*\s*\+|[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\([^)]*\))/;
+const SQL_PREPARE_CHAIN_RE =
+  /\b(?:[\w$]+(?:\.[\w$]+)*)\.prepare\(\s*[A-Za-z_$][\w$]*\s*\)\s*\.\s*(?:all|get|run|query)\s*\(/;
+const SQL_SINK_RE = new RegExp(`${SQL_DIRECT_SINK_RE.source}|${SQL_PREPARE_CHAIN_RE.source}`);
 
 // Quick guardrail: only drive obviously tainted query-shape lines.
 const QUERY_TAINT_RE = /`[^`]*\$\{|['"][^"']*['"]\s*\+|[A-Za-z_$][\w$]*\s*\+/;

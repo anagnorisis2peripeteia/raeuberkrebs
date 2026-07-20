@@ -110,6 +110,51 @@ describe("raeuberkrebs command-injection gate", () => {
   });
 });
 
+const UNSAFE_EXEC_FIXTURE = join(ROOT, "fixtures", "unsafe-exec-node");
+
+describe("raeuberkrebs unsafe-exec gate", () => {
+  it("fires on the planted fixture and returns a proven, evidence-bearing PoC", () => {
+    const r = runRedteam(UNSAFE_EXEC_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "unsafe-exec");
+    assert.ok(e, "expected an unsafe-exec exploit");
+    assert.equal(e.proof, "marker-executed");
+    assert.match(e.evidence, /RAEUBER_[0-9a-f]+/);
+    assert.ok(e.payload.includes("String.fromCharCode") || e.payload.startsWith("return String.fromCharCode"));
+  });
+
+  it("generalizes to a NOVEL unsafe new Function body (marker-executed)", () => {
+    const dir = scratch({
+      "app.js": 'function runBody(body){ return new Function("x", body)(41); }\nmodule.exports.runBody = runBody;\n',
+    });
+    try {
+      const r = runRedteam(dir, ["app.js"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find((x) => x.attackClass === "unsafe-exec");
+      assert.ok(e, "expected an unsafe-exec exploit");
+      assert.equal(e.file, "app.js");
+      assert.equal(e.proof, "marker-executed");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire on constant-arg eval / Function / vm invocations", () => {
+    const dir = scratch({
+      "safe.js":
+        'const vm = require("node:vm");\nfunction safeEval(){ return eval("1 + 1"); }\nfunction safeFunction(){ return new Function("return 123"); }\nfunction safeVm(){ return vm.runInThisContext("1 + 1"); }\nmodule.exports = { safeEval, safeFunction, safeVm };\n',
+    });
+    try {
+      const r = runRedteam(dir, ["safe.js"], LOCAL);
+      assert.equal(r.exploits.length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+      assert.ok(r.lanes.some((l) => l.attackClass === "unsafe-exec" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
 
 describe("raeuberkrebs command-injection gate (Swift lane)", () => {

@@ -35,6 +35,7 @@ import { ControlPlaneAttacker } from "./attackers/control-plane.js";
 import { ExecAuthorizationAttacker } from "./attackers/exec-authorization.js";
 import {
   MissingAuthenticationDotnetAttacker,
+  DotnetSecurityScanAttacker,
   ResourceExhaustionDotnetAttacker,
   UnsafeExecDotnetAttacker,
   BrokenObjectAccessDotnetAttacker,
@@ -94,6 +95,7 @@ export const ATTACKERS: Attacker[] = [
   new PathTraversalDotnetAttacker(),
   new UnsafeDeserializationDotnetAttacker(),
   MissingAuthenticationDotnetAttacker,
+  DotnetSecurityScanAttacker,
   ResourceExhaustionDotnetAttacker,
   UnsafeExecDotnetAttacker,
   BrokenObjectAccessDotnetAttacker,

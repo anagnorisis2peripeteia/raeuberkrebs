@@ -10,6 +10,16 @@ import { DOTNET_SOURCE_RE } from "./dotnet.js";
 export const UNTRUSTED_INPUT =
   /GetStringArg|GetIntArg|GetBoolArg|GetStringArrayArg|NodeInvokeRequest|request\.Args|\brequest\.|responseText|controlHost|HttpListenerContext|context\.Request|\bincoming\b|payload/;
 
+// roslyn-security-scan: first-pass C#/.NET sink enumeration for CA3001-CA3012 / Security Code Scan
+// families (command, SQL, LDAP, XPath, XSS, path tampering, deserialization/loader risk). This lane
+// intentionally stays static-only and taint-gated, with targeted runtime proving planned per-sink in follow-on
+// work where a real Roslyn graph is available.
+export const DotnetSecurityScanAttacker = new StaticDotnetLane(
+  "dotnet-security-scan",
+  /Process\.Start\s*\(|new\s+ProcessStartInfo|\.CommandText\s*=|new\s+SqlCommand|\.Filter\s*=|\.SearchFilter\s*=|\.SearchScope\s*=\s*DirectoryScope|\.SelectNodes?\s*\(|\.SelectSingleNode\s*\(|XPathExpression\.Compile\s*\(|Execute(?:Query|Reader)\s*\(|Assembly\.Load(?:From|File)?\s*\(|AssemblyLoadContext\.Default\.LoadFromAssemblyPath\s*\(|\bBinaryFormatter\b|\bTypeNameHandling\b|\bXml(Text)?Reader\b|\.InnerHtml\s*=|\.WriteRaw\s*\(|\.WriteContent\s*\(|HttpUtility\.HtmlEncode|Path\.Combine\s*\(|File\.(?:ReadAll|WriteAll|AppendAll|Create|Open|Delete|Move|Copy)\s*\(|Path\.GetFullPath\s*\(/,
+  true,
+);
+
 /**
  * A static C# lane built from a sink regex (+ optional file-level taint gate). Feeds the sweep's
  * guard-consistency signal; the execute-gate skips it (staticOnly), proof is per-lead.

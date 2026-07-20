@@ -22,9 +22,11 @@ const SKIP_RE =
 const SANITIZER_SIGNALS: Partial<Record<AttackClass, RegExp>> = {
   // Node + C# guard names (union): a file referencing any of these is treated as guarding the class.
   ssrf: /\bssrf\b|ssrfPolicy|ssrfGuard|isPrivate(?:Host|Ip|Address)|blocked?Hosts?|denyHost|allow-?list|allowedHosts?|assertPublic|safeFetch|guardedFetch|validateUrl|isAllowedUrl|resolvePublicUrl|IsPrivateOrLoopback|HttpUrlRiskEvaluator|HttpUrlValidator|IsUrlSafe|DangerousUrlPattern|CanvasUrlSafety|BuildSafeHandler|hostAllowlist/i,
+  "exec-authorization": /policy|authorization|authorized|authorize|approve|approval|allow(?:list)?|requires?|denied|forbidden|requires?\s+approval|permission|not\s+allowed|signature|required/i,
   "path-traversal": /isPathInside|sanitize(?:Path|Filename)|assertWithin|containsTraversal|resolveWithin|safeJoin|isSubPath|IsPathWithinRoot|GetFinalPathFromHandle|ResolveLinkTarget|writeExternalFileWithinRoot|GetFullPath|IsWithin/i,
   "missing-authentication": /Authenticat|Authoriz|VerifySignature|ValidateToken|\bbearer\b|apiKey|IsAuthenticated|CheckToken|requireAuth|\bhmac\b|McpAuthToken|BearerToken|signatureValid|ConstantTimeEquals|FixedTimeEquals/i,
   "broken-object-access": /OwnerId|ownedBy|IsOwner|belongsTo|\bprincipal\b|CheckOwnership|assertOwn|IsAuthorizedFor|scopedTo|AccessControl|RequireScope|EnsureApproved/i,
+  "control-plane": /approval|approvalMode|allow(?:list)?|endpoint|endpointRoot|baseUrl|tool(?:ing)?|allowAll|inheritEnv|policyMode|control\s*plane|config\./i,
   // Round-2 breadth lanes with a project-owned guard: a file that hardens the class references one
   // of these, so a sink site that doesn't is the guard-gap. (insecure-tls / weak-crypto / insecure-
   // temp-file have no "guard" — the primitive itself is the risk — so they get no signal and never

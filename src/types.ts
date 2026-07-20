@@ -22,6 +22,8 @@ export type AttackClass =
   | "unsafe-exec" // untrusted input into eval / new Function / dynamic import
   | "csv-injection" // untrusted input reaches a CSV/spreadsheet cell without formula-prefix neutralization
   | "broken-access-control" // a privileged effect is reachable through a path guarded WEAKER than a sibling reaching the same effect (CWE-863/862/269 — differential authorization)
+  | "exec-authorization" // policy semantics diverge across command launch argv shapes (canonical flag-sequence checks can be bypassed)
+  | "control-plane" // unauthorized control-plane mutations weaken runtime protections, enabling actions the caller previously couldn't execute (CWE-640/CWE-693)
   | "broken-object-access" // a resource is reachable by a caller-controlled key with no ownership check — one principal reads/mutates another's object (CWE-639/CWE-284 — IDOR/BOLA)
   | "missing-authentication" // an inbound/webhook handler performs a privileged action without authenticating the sender or verifying the request signature (CWE-306/CWE-290 — missing auth / spoofing)
   | "resource-exhaustion" // untrusted input reaches a catastrophic-backtracking regex or an unbounded op — a crafted input hangs/OOMs the process (CWE-400/CWE-1333 — ReDoS / uncontrolled resource consumption)
@@ -45,6 +47,8 @@ export const ATTACK_CLASSES: AttackClass[] = [
   "unsafe-exec",
   "csv-injection",
   "broken-access-control",
+  "exec-authorization",
+  "control-plane",
 ];
 
 /** Terminal verdicts, most-benign first. Only `clean` exits 0. */

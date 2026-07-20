@@ -22,6 +22,8 @@ import { ZipSlipAttacker } from "./attackers/zip-slip.js";
 import { SsrfDotnetAttacker } from "./attackers/ssrf-dotnet.js";
 import { PathTraversalDotnetAttacker } from "./attackers/path-traversal-dotnet.js";
 import { UnsafeDeserializationDotnetAttacker } from "./attackers/unsafe-deserialization-dotnet.js";
+import { ControlPlaneAttacker } from "./attackers/control-plane.js";
+import { ExecAuthorizationAttacker } from "./attackers/exec-authorization.js";
 import {
   MissingAuthenticationDotnetAttacker,
   ResourceExhaustionDotnetAttacker,
@@ -55,6 +57,8 @@ export const ATTACKERS: Attacker[] = [
   new CsvInjectionSwiftAttacker(),
   new SsrfAttacker(),
   new CsvInjectionAttacker(),
+  new ControlPlaneAttacker(),
+  new ExecAuthorizationAttacker(),
   new BrokenAccessControlAttacker(),
   new BrokenObjectAccessAttacker(),
   new MissingAuthenticationAttacker(),

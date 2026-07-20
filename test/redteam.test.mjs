@@ -742,6 +742,78 @@ describe("raeuberkrebs broken-access-control gate (models the openclaw GHSA-j4mm
   });
 });
 
+const EXEC_AUTH_FIXTURE = join(ROOT, "fixtures", "exec-authorization-node");
+
+describe("raeuberkrebs exec-authorization gate (argv-policy differential)", () => {
+  it("fires on the planted fixture when equivalent argv forms diverge on launch policy", () => {
+    const r = runRedteam(EXEC_AUTH_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "exec-authorization");
+    assert.ok(e, "expected an exec-authorization exploit");
+    assert.equal(e.proof, "marker-executed");
+    assert.ok(e.payload.includes("approvedArgv="), "payload should capture both canonical and approved argv");
+    assert.match(e.sink, /exec-authorization\(runCommand\)/);
+    assert.match(e.evidence, /RAEUBER_[0-9a-f]+/);
+  });
+
+  it("fires on NOVEL differential logic where legacy and equivalent argv checks diverge", () => {
+    const dir = scratchModule({
+      "app.mjs":
+        'import { execFileSync } from "node:child_process";\n' +
+        "function dispatch(argv) {\n" +
+        '  const cmd = Array.isArray(argv) ? argv : ["sh", "-c", String(argv ?? "")];\n' +
+        "  if (cmd[0] === \"node\" && cmd[1] === \"--eval\") {\n" +
+        '    throw new Error("policy blocked (legacy check)");\n' +
+        "  }\n" +
+        "  if (cmd[0] === \"sh\" && cmd[1] === \"-l\" && cmd[2] === \"-c\") {\n" +
+        '    throw new Error("policy blocked (legacy check)");\n' +
+        "  }\n" +
+        "  if (cmd[0] === \"sh\" && cmd[1] === \"-e\" && cmd[2] === \"-c\") {\n" +
+        '    throw new Error("policy blocked (legacy check)");\n' +
+        "  }\n" +
+        '  if (cmd[0] === "sh" && cmd[1] === "-c") {\n' +
+        '    throw new Error("policy blocked (legacy check)");\n' +
+        "  }\n" +
+        "  return execFileSync(cmd[0], cmd.slice(1), { encoding: \"utf8\" });\n" +
+        "}\n" +
+        "function runCommand(argv) {\n" +
+        "  return dispatch(argv);\n" +
+        "}\n" +
+        "export { runCommand };\n",
+    });
+    try {
+      const r = runRedteam(dir, ["app.mjs"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find((x) => x.attackClass === "exec-authorization");
+      assert.ok(e, "expected an exec-authorization exploit on novel code");
+      assert.equal(e.file, "app.mjs");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire when launch policy is consistent across equivalent argv forms", () => {
+    const dir = scratch({
+      "safe.js":
+        'const { execFileSync } = require("node:child_process");\n' +
+        "function runCommand(input) {\n" +
+        "  const argv = Array.isArray(input) ? input : [\"sh\", \"-c\", String(input || \"\")];\n" +
+        "  throw new Error(\"forbidden: launch policy requires an out-of-band allowlist\");\n" +
+        "  return execFileSync(argv[0], argv.slice(1), { encoding: \"utf8\" });\n" +
+        "}\n" +
+        "module.exports.runCommand = runCommand;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["safe.js"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === \"exec-authorization\").length, 0, "consistent policy should not fire");
+      assert.notEqual(r.verdict, "vulnerable");
+      assert.ok(r.lanes.some((l) => l.attackClass === "exec-authorization" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const BOA_FIXTURE = join(ROOT, "fixtures", "broken-object-access-node");
 
 describe("raeuberkrebs broken-object-access gate (IDOR / CWE-639 — object-level authorization)", () => {

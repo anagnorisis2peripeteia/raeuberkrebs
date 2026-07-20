@@ -38,10 +38,15 @@ no host FS); a reduced-isolation local copy is the fallback when crabbox isn't p
 - Lane: **path-traversal** (Node `.js/.cjs`, Swift `.swift`, Python `.py`, Go `.go`), detect filesystem
   joins/reads with untrusted components (`path.join`, `filepath.Join`, `String(contentsOfFile:)`,
   `open(... )`) → prove via marker-secrets read outside base path.
+- Lane: **exec-authorization** (Node `.js/.cjs`), detect differential command launch policy where policy-facing
+  wrappers call a launcher that still accepts policy-unsafe equivalent argv forms (for example `node --eval`
+  bypassing `node -e`) → prove with benign argv differential payloads and marker execution.
+- Lane: **control-plane** (Node `.js/.cjs`), detect stateful policy-control escalation by driving low-privileged
+  config mutation first and then executing a marker-protected action only after that mutation succeeds.
+- Lane: **sql-injection** (Node `.js/.cjs`), broadened sink matching now includes `prepare(...).all/run/get/query()`
+  flows so prepared-query + dynamic-execution patterns on SQLite/driver-like APIs are exercised against planted
+  fixtures.
 - Primitives: the crabbox/local sandbox with a `writeFile` PoC-drop, git-diff scoping, the
   fail-closed result model, canary-liveness in the runner, the CLI gate.
 
-**Next (per `project_raeuberkrebs` memory):** more lanes + languages (SQLi, path-traversal,
-deserialization, SSRF, unsafe-exec) · the diff-gate polish + `validate:attacker` canary script ·
-the `raeuberkrebs-hunt` discovery skill (free sweep → budget-capped LLM PoC-authoring → execute-to-
-prove → issue-first) · wire the `security` gate into `krebs-suite.md` + the pr-* skills.
+**Next (roadmap):** path-traversal static hardening is now live, plus the remaining C# static lanes (unsafe-exec, SQLi, weak-crypto, etc.) are shipping in follow-up chunks; current scope remains PR validation, live canary discipline, and discovery-tooling integration.

@@ -18,6 +18,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const LAUNCHER_NAME_RE = /^(?:run|exec|spawn|dispatch|invoke|handle|launch|command|execute)/i;
 const POLICY_RE = /\b(?:approval|allow(?:list)?|authorization|authorize|policy|approve|denied|forbidden|blocked|permission|not allowed|requires?)\b/i;
 const LAUNCH_RE = /\b(?:exec(?:Sync|FileSync)?|spawn(?:Sync)?|child_process)\b/i;
+const CALLEE_RE = /(?<![.\w$])([a-z][A-Za-z0-9_$]*)\s*\(/g;
 
 type CmdArgv = string[];
 
@@ -27,12 +28,58 @@ interface FunctionEntry {
   body: string;
 }
 
+function transitiveLauncherCall(
+  name: string,
+  bodyByName: Map<string, string>,
+  seen: Set<string>,
+  depth = 2,
+): boolean {
+  if (depth < 0) return false;
+  if (seen.has(name)) return false;
+  seen.add(name);
+
+  const body = bodyByName.get(name);
+  if (!body) return false;
+  if (LAUNCH_RE.test(body)) return true;
+
+  for (const m of body.matchAll(CALLEE_RE)) {
+    const callee = m[1];
+    if (!callee || !bodyByName.has(callee)) continue;
+    if (transitiveLauncherCall(callee, bodyByName, seen, depth - 1)) return true;
+  }
+  return false;
+}
+
+function transitivePolicyCheck(
+  name: string,
+  bodyByName: Map<string, string>,
+  seen: Set<string>,
+  depth = 2,
+): boolean {
+  if (depth < 0) return false;
+  if (seen.has(name)) return false;
+  seen.add(name);
+
+  const body = bodyByName.get(name);
+  if (!body) return false;
+  if (POLICY_RE.test(body)) return true;
+
+  for (const m of body.matchAll(CALLEE_RE)) {
+    const callee = m[1];
+    if (!callee || !bodyByName.has(callee)) continue;
+    if (transitivePolicyCheck(callee, bodyByName, seen, depth - 1)) return true;
+  }
+  return false;
+}
+
 function functionCandidates(source: string): FunctionEntry[] {
+  const bodyByName = new Map(functionUnits(source).map((u) => [u.name, u.body]));
   const exported = new Set(nodeExportedNames(source));
   return functionUnits(source)
     .filter((u) => exported.has(u.name))
     .filter((u) => LAUNCHER_NAME_RE.test(u.name))
-    .filter((u) => POLICY_RE.test(u.body) && LAUNCH_RE.test(u.body))
+    .filter((u) => POLICY_RE.test(u.body) || transitivePolicyCheck(u.name, bodyByName, new Set(), 2))
+    .filter((u) => LAUNCH_RE.test(u.body) || transitiveLauncherCall(u.name, bodyByName, new Set(), 2))
     .map((u) => ({ name: u.name, line: u.line, body: u.body }));
 }
 
@@ -107,6 +154,13 @@ function isAuthzErr(e) {
   return /(approval|allow|denied|forbidden|blocked|permission|not allowed|not authorized|unauthorized|policy|require|approve|required)/.test(t);
 }
 
+function authzErrorText(e) {
+  const name = e && e.name ? String(e.name) : "";
+  const msg = e && e.message ? String(e.message) : "";
+  const fallback = e ? String(e) : "";
+  return [name, msg].filter(Boolean).join(" ") || fallback;
+}
+
 function hasMarker(v) {
   return asText(v).includes(MARKER);
 }
@@ -131,7 +185,7 @@ async function callLauncher(payload) {
       if (hasMarker(output)) return { fired: true, blocked: false, output };
     } catch (e) {
       output = asText(e);
-      if (isAuthzErr(output)) blocked = true;
+      if (isAuthzErr(authzErrorText(e))) blocked = true;
       if (hasMarker(output)) return { fired: true, blocked: true, output };
     }
   }

@@ -12,12 +12,7 @@ function snapshotConfig() {
   return JSON.parse(JSON.stringify(policy));
 }
 
-function hasWriteScope(ctx) {
-  return Boolean(ctx && Array.isArray(ctx.scopes) && ctx.scopes.includes("write"));
-}
-
 function setPolicy(ctx, patch) {
-  if (!hasWriteScope(ctx)) throw new Error("forbidden: write required");
   if (!patch || typeof patch !== "object") return policy;
   if (patch.approvalMode) policy.approvalMode = patch.approvalMode;
   if (patch.approvalRequired !== undefined) policy.approvalRequired = Boolean(patch.approvalRequired);
@@ -30,8 +25,6 @@ function setPolicy(ctx, patch) {
 }
 
 function executeProtected(ctx, req) {
-  if (!hasWriteScope(ctx)) throw new Error("forbidden: write required");
-
   if ((policy.approvalMode && policy.approvalMode !== "optional") || policy.approvalRequired) {
     if (!req || req.approved !== true) {
       throw new Error("approval required");

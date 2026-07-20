@@ -1,5 +1,5 @@
 import { readdirSync } from "node:fs";
-import { openSandbox, type SandboxOptions } from "./sandbox.js";
+import { openSandbox, type Sandbox, type SandboxOptions } from "./sandbox.js";
 import type { Attacker } from "./attackers/attacker.js";
 import { CommandInjectionAttacker } from "./attackers/command-injection.js";
 import { CommandInjectionDotnetAttacker } from "./attackers/command-injection-dotnet.js";
@@ -127,10 +127,10 @@ function handledFilesIn(dir: string, attacker: Attacker): string[] {
  */
 function proveLaneLive(
   attacker: Attacker,
-  sbox: SandboxOptions,
+  box: Sandbox,
 ): { live: boolean; reason?: string; sandbox: string } {
-  const box = openSandbox(attacker.canaryFixtureDir, sbox);
   try {
+    box.seedDir(attacker.canaryFixtureDir);
     const files = handledFilesIn(attacker.canaryFixtureDir, attacker);
     const fired = attacker.hunt(attacker.canaryFixtureDir, files, box);
     return fired.length > 0
@@ -142,8 +142,6 @@ function proveLaneLive(
         };
   } catch (err) {
     return { live: false, reason: `canary errored: ${err instanceof Error ? err.message : err}`, sandbox: box.name };
-  } finally {
-    box.dispose();
   }
 }
 
@@ -182,27 +180,27 @@ export function runRedteam(
   }
 
   for (const attacker of applicable) {
-    const liveness = proveLaneLive(attacker, sbox);
-    sandboxName = liveness.sandbox;
-    if (!liveness.live) {
-      lanes.push({ attackClass: attacker.attackClass, live: false, attacked: 0, fired: 0, deadReason: liveness.reason });
-      continue;
-    }
-    const targetFiles = changedFiles.filter((f) => attacker.handles(f));
     const box = openSandbox(targetDir, sbox);
-    let laneExploits: Exploit[] = [];
     try {
-      laneExploits = attacker.hunt(targetDir, targetFiles, box);
+      const liveness = proveLaneLive(attacker, box);
+      sandboxName = liveness.sandbox;
+      if (!liveness.live) {
+        lanes.push({ attackClass: attacker.attackClass, live: false, attacked: 0, fired: 0, deadReason: liveness.reason });
+        continue;
+      }
+      box.seedDir(targetDir);
+      const targetFiles = changedFiles.filter((f) => attacker.handles(f));
+      const laneExploits = attacker.hunt(targetDir, targetFiles, box);
+      exploits.push(...laneExploits);
+      lanes.push({
+        attackClass: attacker.attackClass,
+        live: true,
+        attacked: targetFiles.length,
+        fired: laneExploits.length,
+      });
     } finally {
       box.dispose();
     }
-    exploits.push(...laneExploits);
-    lanes.push({
-      attackClass: attacker.attackClass,
-      live: true,
-      attacked: targetFiles.length,
-      fired: laneExploits.length,
-    });
   }
 
   const verdict = verdictFrom(lanes, exploits);

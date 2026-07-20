@@ -30,6 +30,7 @@ export type AttackClass =
   | "prototype-pollution" // untrusted keys reach a recursive merge/set that writes through `__proto__`/`constructor.prototype`, polluting Object.prototype for every object (CWE-1321)
   | "zip-slip" // an archive entry with a `../` path is written outside the extraction directory — extraction with no path-containment check (CWE-22 archive variant)
   | "weak-crypto" // a broken/weak cryptographic primitive is used (MD5/SHA1 for security, DES/TripleDES/RC2, ECB mode, no padding) — collisions/decryption feasible (CWE-327/328/326)
+  | "stored-taint" // untrusted input is written after light input-shape filtering into a stored medium, then later read back unsafely (CWE-20/434/829)
   | "insecure-tls" // TLS certificate validation is disabled — a custom accept-any-cert callback or revocation turned off makes the node trust any server, enabling MITM (CWE-295)
   | "xxe" // XML parsed with DTD/external-entity resolution enabled on attacker-supplied XML — file read / SSRF via external entities (CWE-611)
   | "insecure-temp-file" // a predictable temp path (Path.GetTempFileName / GetTempPath) holds sensitive data — race / symlink / predictable-name attack (CWE-377)

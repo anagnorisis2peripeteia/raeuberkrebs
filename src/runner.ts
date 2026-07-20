@@ -19,6 +19,7 @@ import { UnsafeExecAttacker } from "./attackers/unsafe-exec.js";
 import { ResourceExhaustionAttacker } from "./attackers/resource-exhaustion.js";
 import { PrototypePollutionAttacker } from "./attackers/prototype-pollution.js";
 import { ZipSlipAttacker } from "./attackers/zip-slip.js";
+import { StoredTaintAttacker } from "./attackers/stored-taint.js";
 import { PolicyBeliefDivergenceAttacker } from "./attackers/policy-belief-divergence.js";
 import { SsrfDotnetAttacker } from "./attackers/ssrf-dotnet.js";
 import { PathTraversalDotnetAttacker } from "./attackers/path-traversal-dotnet.js";
@@ -66,6 +67,9 @@ export const ATTACKERS: Attacker[] = [
   new ResourceExhaustionAttacker(),
   new PrototypePollutionAttacker(),
   new ZipSlipAttacker(),
+  new StoredTaintAttacker(),
+  // Node static lanes: high-risk crypto/token weaknesses surfaced in source (issue #19). Static-only;
+  // they contribute leads for the free sweep but are not executed as drive-and-prove lanes.
   // Differential-oracle lane (already an instance, not a class): probes a security-decision control's
   // belief vs ground truth. See src/differential-oracle.ts + PLAYBOOK.md.
   PolicyBeliefDivergenceAttacker,
@@ -127,7 +131,7 @@ function proveLaneLive(
       ? { live: true, sandbox: box.name }
       : {
           live: false,
-          reason: `command-injection canary did not fire against its planted fixture (${box.name})`,
+          reason: `${attacker.attackClass} canary did not fire against its planted fixture (${box.name})`,
           sandbox: box.name,
         };
   } catch (err) {

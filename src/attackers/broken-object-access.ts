@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, NODE_RUN, NODE_SOURCE_RE, freshMarker, nodeExportedNames, scanSinkLeads } from "./attacker.js";
+import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames, scanSinkLeads } from "./attacker.js";
 import { functionUnits } from "./broken-access-control.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -128,7 +128,7 @@ export class BrokenObjectAccessAttacker implements Attacker {
           const marker = freshMarker();
           const driverRel = `.raeuber-idor-${marker}.mjs`;
           sandbox.writeFile(driverRel, idorDiffDriver(file, create.name, read.name, marker));
-          const run = sandbox.exec(`${NODE_RUN} ${driverRel} 2>&1`, 15_000);
+          const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 15_000);
           const out = run.stdout + run.stderr;
           if (!out.includes("IDOR_FIRED")) continue;
           exploits.push({

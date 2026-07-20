@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { AttackClass, Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
 
@@ -71,6 +73,20 @@ export const NODE_SOURCE_RE = /\.(?:ts|mts|cts|mjs|js|cjs)$/;
 /** How the lanes invoke a generated .mjs driver: type-stripping on, experimental warning silenced so
  *  it can't pollute the marker evidence. Prefix for `sandbox.exec`. */
 export const NODE_RUN = "node --no-warnings --experimental-transform-types";
+
+/**
+ * Pick the best command for the target project.
+ *
+ * For monorepos with tsconfig path-aliases, `node --experimental-transform-types` often fails while
+ * loading project modules. If `node_modules/.bin/tsx` exists, use it so the repo's own TS loader and
+ * tsconfig path mapping are honored. This keeps the old path as a fast fallback.
+ */
+export function nodeRunCommand(targetDir: string): string {
+  if (existsSync(join(targetDir, "node_modules", ".bin", "tsx"))) {
+    return "./node_modules/.bin/tsx" + (existsSync(join(targetDir, "tsconfig.json")) ? " --tsconfig tsconfig.json" : "");
+  }
+  return NODE_RUN;
+}
 
 /**
  * An ES-module driver that dynamically imports `moduleRel` and calls `fnName(arg)` — the first

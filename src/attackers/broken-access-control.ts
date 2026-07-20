@@ -6,7 +6,7 @@ import type { Sandbox } from "../sandbox.js";
 import {
   type Attacker,
   type StaticLead,
-  NODE_RUN,
+  nodeRunCommand,
   NODE_SOURCE_RE,
   freshMarker,
   nodeExportedNames,
@@ -677,7 +677,7 @@ export class BrokenAccessControlAttacker implements Attacker {
         const marker = freshMarker();
         const driverRel = `.raeuber-bac-${marker}.mjs`;
         sandbox.writeFile(driverRel, bacDiffDriver(file, cand.weak.name, cand.weak.scopes, cand.strong.name, marker));
-        const run = sandbox.exec(`${NODE_RUN} ${driverRel} 2>&1`, 15_000);
+        const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 15_000);
         const out = run.stdout + run.stderr;
         if (!out.includes("BAC_FIRED")) continue;
         const weakScope = cand.weak.scopes.length ? cand.weak.scopes.join("+") : "(no authorization check)";
@@ -718,7 +718,7 @@ export class BrokenAccessControlAttacker implements Attacker {
           const marker = freshMarker();
           const driverRel = `.raeuber-bac-state-${marker}.mjs`;
           sandbox.writeFile(driverRel, bacStatefulDriver(file, action.name, transition.name, marker));
-          const run = sandbox.exec(`${NODE_RUN} ${driverRel} 2>&1`, 15_000);
+          const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 15_000);
           const out = run.stdout + run.stderr;
           if (!out.includes("BAC_STATEFUL_FIRED")) continue;
           const baselineScope = action.scopes.length ? action.scopes.join("+") : "(no authorization check)";

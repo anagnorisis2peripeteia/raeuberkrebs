@@ -15,6 +15,7 @@ import { CsvInjectionAttacker } from "./attackers/csv-injection.js";
 import { BrokenAccessControlAttacker } from "./attackers/broken-access-control.js";
 import { BrokenObjectAccessAttacker } from "./attackers/broken-object-access.js";
 import { MissingAuthenticationAttacker } from "./attackers/missing-authentication.js";
+import { UnsafeExecAttacker } from "./attackers/unsafe-exec.js";
 import { ResourceExhaustionAttacker } from "./attackers/resource-exhaustion.js";
 import { PrototypePollutionAttacker } from "./attackers/prototype-pollution.js";
 import { ZipSlipAttacker } from "./attackers/zip-slip.js";
@@ -48,6 +49,7 @@ export const ATTACKERS: Attacker[] = [
   new CommandInjectionSwiftAttacker(),
   new PathTraversalSwiftAttacker(),
   new PathTraversalAttacker(),
+  new UnsafeExecAttacker(),
   new SsrfSwiftAttacker(),
   new ResourceExhaustionSwiftAttacker(),
   new SqlInjectionSwiftAttacker(),

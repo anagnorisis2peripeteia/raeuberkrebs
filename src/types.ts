@@ -54,6 +54,7 @@ export const ATTACK_CLASSES: AttackClass[] = [
   "ssrf",
   "unsafe-exec",
   "csv-injection",
+  "prototype-pollution",
   "secondary-interpreter",
   "broken-access-control",
   "exec-authorization",

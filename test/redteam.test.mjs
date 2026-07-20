@@ -355,6 +355,7 @@ describe("raeuberkrebs csv-injection gate (Swift lane)", () => {
 });
 
 const PT_FIXTURE = join(ROOT, "fixtures", "path-traversal-node");
+const PT_BOUNDARY_FIXTURE = join(ROOT, "fixtures", "path-traversal-boundary-node");
 
 describe("raeuberkrebs path-traversal gate", () => {
   it("fires on the planted fixture — reads a decoy secret via ../ (secret-exfiltrated)", () => {
@@ -381,6 +382,47 @@ describe("raeuberkrebs path-traversal gate", () => {
     try {
       const r = runRedteam(dir, ["guarded.js"], LOCAL);
       assert.equal(r.exploits.length, 0, "containment guard must defeat the ../ attack");
+      assert.notEqual(r.verdict, "vulnerable");
+      assert.ok(r.lanes.some((l) => l.attackClass === "path-traversal" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("raeuberkrebs path-traversal gate (filesystem boundary differential)", () => {
+  it("fires on the planted boundary fixture — a symlink-capability payload reaches outside", () => {
+    const r = runRedteam(PT_BOUNDARY_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "path-traversal");
+    assert.ok(e, "expected a path-traversal exploit");
+    assert.equal(e.proof, "secret-exfiltrated");
+    assert.ok(
+      e.payload.includes("boundary-link") ||
+        e.payload.includes("bridge-link") ||
+        e.payload.includes("../.raeuber-boundary"),
+      "expected a boundary-bypass payload",
+    );
+    assert.match(e.evidence, /boundary topology/);
+    assert.match(e.evidence, /appBase/);
+  });
+
+  it("does NOT fire for boundary-resolved reads without bypass payloads", () => {
+    const dir = scratch({
+      "guarded.js":
+        'const fs = require("fs");\nconst path = require("path");\n' +
+        "const root = __dirname;\n" +
+        'function read(name) {\n' +
+        '  const safe = path.resolve(root, "allowed.txt");\n' +
+        '  if (!fs.existsSync(safe)) fs.writeFileSync(safe, "BOUNDARY_OK");\n' +
+        "  const target = path.resolve(root, name);\n" +
+        "  if (!target.startsWith(root + path.sep)) throw new Error('denied');\n" +
+        "  return fs.readFileSync(target, 'utf8');\n" +
+        "}\nmodule.exports.read = read;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["guarded.js"], LOCAL);
+      assert.equal(r.exploits.length, 0);
       assert.notEqual(r.verdict, "vulnerable");
       assert.ok(r.lanes.some((l) => l.attackClass === "path-traversal" && l.live));
     } finally {

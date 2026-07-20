@@ -44,6 +44,22 @@ const SCOPE_RANK: Record<string, number> = {
   admin: 3, administrator: 3, owner: 3, superuser: 3, super: 3, root: 3, sysadmin: 3, operator: 3, "operator.admin": 3,
 };
 
+// State-provenance transitions usually involve these lifecycle verbs and nouns.
+const STATE_TRANSITION_NAME_RE =
+  /^(?:bootstrap|create|open|connect|reconnect|rebind|replay|resume|restore|loopback|pair|pairing|handoff|handover|bind|adopt|revoke|rotate|migrate|claim|transfer|adopt|claim|attach|replace|swap)/i;
+const STATE_TRANSITION_BODY_RE = /\b(?:session|conversation|token|identity|principal|scope|capability|capabilityId|conversationId|sessionId|binding|replay|reconnect|loopback|pair|handoff|handover|delegate|impersonat|attach|rebind|migrate|claim)/i;
+const PRIVILEGED_ACTION_RE = /\b(?:admin|owner|operator\.admin|superuser|sysadmin|system)\b/i;
+
+function hasStateTransitionHint(entry: { name: string; body: string }): boolean {
+  return STATE_TRANSITION_NAME_RE.test(entry.name) || STATE_TRANSITION_BODY_RE.test(entry.body);
+}
+
+function isPrivilegedAction(entry: Entry): boolean {
+  const hasAdminHint = PRIVILEGED_ACTION_RE.test(entry.name) || PRIVILEGED_ACTION_RE.test(entry.body);
+  const hasGuardedScope = entry.scopes.length > 0 && entry.scopes.some((s) => scopeRank(s) >= 3);
+  return hasAdminHint || hasGuardedScope;
+}
+
 function scopeRank(scope: string): number {
   return SCOPE_RANK[scope.toLowerCase()] ?? 2;
 }
@@ -229,6 +245,7 @@ function sameScopes(a: string[], b: string[]): boolean {
 
 interface Entry {
   name: string;
+  body: string;
   line: number;
   scopes: string[];
   effects: Set<string>;
@@ -330,6 +347,285 @@ process.stdout.write("no-bac");
 `.trim();
 }
 
+function bacStatefulDriver(
+  moduleRel: string,
+  actionName: string,
+  transitionName: string,
+  marker: string,
+): string {
+  const mod = JSON.stringify("./" + moduleRel);
+  const A = JSON.stringify(actionName);
+  const T = JSON.stringify(transitionName);
+  const MK = JSON.stringify(marker);
+
+  return `
+const MARKER = ${MK};
+let m;
+try { m = await import(${mod}); } catch (e) { process.stdout.write("BAC_STATEFUL_IMPORT_FAIL:" + e); process.exit(0); }
+
+function pick(n){
+  if (m && typeof m[n] === "function") return m[n];
+  if (m && m.default && typeof m.default[n] === "function") return m.default[n];
+  return null;
+}
+const action = pick(${A});
+const transition = pick(${T});
+if (!action || !transition) { process.stdout.write("BAC_STATEFUL_NOT_A_FUNCTION"); process.exit(0); }
+
+function asText(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  try { return JSON.stringify(v); } catch { return String(v); }
+}
+function hasMarker(v) {
+  return asText(v).indexOf(MARKER) !== -1;
+}
+function isAuthzErr(e) {
+  const t = String((e && ((e.name || "") + " " + (e.message || ""))) || e || "").toLowerCase();
+  return /(forbidden|denied|access|permission|not allowed|not authorized|unauthorized|scope|admin|owner|token|session|principal|identity|scope)/.test(t);
+}
+async function call(fn, attempts) {
+  let authzErr = false;
+  let lastErr = null;
+  for (const args of attempts) {
+    try {
+      return { ok: true, ret: await fn(...args) };
+    } catch (e) {
+      lastErr = e;
+      if (isAuthzErr(e)) authzErr = true;
+    }
+  }
+  return { ok: false, ret: lastErr, authzErr };
+}
+function collectIds(v, out) {
+  if (out === undefined) out = [];
+  if (v == null) return out;
+  if (typeof v === "string" && v.length < 120) {
+    out.push(v);
+    return out;
+  }
+  if (Array.isArray(v)) {
+    for (const x of v) collectIds(x, out);
+    return out;
+  }
+  if (typeof v === "object") {
+    for (const k of [
+      "sessionId",
+      "conversationId",
+      "capabilityId",
+      "token",
+      "principal",
+      "principalId",
+      "identity",
+      "identityId",
+      "actor",
+      "actorId",
+      "scope",
+      "scopeId",
+      "capability",
+      "session",
+      "attackerSessionId",
+      "ownerSessionId",
+      "fromSessionId",
+      "toSessionId",
+      "fromSession",
+      "toSession",
+      "sessionFromId",
+      "sessionToId",
+      "targetSessionId",
+    ]) {
+      if (v && typeof (v[k]) === "string") collectIds(v[k], out);
+    }
+  }
+  return out;
+}
+function uniqueStrings(list) {
+  return [...new Set(list.filter((x) => typeof x === "string" && x.length <= 120))];
+}
+function asIdList(v) {
+  return uniqueStrings(collectIds(v, []));
+}
+function withSessionHints(payload, sessionId) {
+  if (!payload || typeof payload !== "object" || sessionId == null) return payload;
+  return Object.assign({}, payload, {
+    sessionId: payload.sessionId || sessionId,
+    conversationId: payload.conversationId || sessionId,
+    conversation: payload.conversation || sessionId,
+    token: payload.token || sessionId,
+    session: payload.session || sessionId,
+  });
+}
+function transitionPayloadCandidates(basePatch, ids) {
+  const patch = Object.assign({}, basePatch);
+  if (!ids || ids.length === 0) return [patch];
+  const first = ids[0];
+  const second = ids[1] || ids[0];
+  const primary = Object.assign({}, patch);
+  if (primary.fromSessionId == null && primary.fromSession == null) {
+    primary.fromSessionId = first;
+    primary.fromSession = first;
+  }
+  if (primary.toSessionId == null && primary.toSession == null) {
+    primary.toSessionId = second;
+    primary.toSession = second;
+  }
+  const reversed = Object.assign({}, patch);
+  if (reversed.fromSessionId == null && reversed.fromSession == null) {
+    reversed.fromSessionId = second;
+    reversed.fromSession = second;
+  }
+  if (reversed.toSessionId == null && reversed.toSession == null) {
+    reversed.toSessionId = first;
+    reversed.toSession = first;
+  }
+  return [patch, primary, reversed];
+}
+
+function snapshot() {
+  const names = ["snapshotState", "snapshot", "dumpState", "sessionState", "capabilityState", "provenanceState"];
+  for (const name of names) {
+    try {
+      if (typeof m[name] === "function") return asText(m[name]());
+      if (m[name] !== undefined) return asText(m[name]);
+    } catch {}
+  }
+  return "<unavailable>";
+}
+function contextShapes() {
+  return [
+    { identity: "attacker-" + MARKER, identityId: "attacker-" + MARKER, scopes: ["write"], principal: "attacker-" + MARKER },
+    { identity: "writer-" + MARKER, roles: ["writer"], scopes: ["writer"] },
+    { identity: "viewer-" + MARKER, role: "writer", scopes: ["writer"] },
+    { identity: "operator-" + MARKER, operator: { scopes: ["write"] } },
+    { user: { identity: "attacker-" + MARKER, scopes: ["write"] } },
+    {},
+  ];
+}
+
+const ACTION_PAYLOADS = [
+  { marker: MARKER, action: MARKER, data: MARKER, command: MARKER, token: "tok-" + MARKER, sessionId: "sess-" + MARKER, conversationId: "conv-" + MARKER, principal: "attacker-" + MARKER },
+  { marker: MARKER, action: MARKER, data: MARKER, command: MARKER, tool: "admin", token: "owner-token-" + MARKER, scope: "admin", principal: "owner-" + MARKER },
+  { marker: MARKER, payload: { marker: MARKER, token: "tok-" + MARKER, action: MARKER } },
+];
+
+const TRANSITION_PAYLOADS = [
+  { marker: MARKER, replay: "owner", fromSessionId: "sess-owner-" + MARKER, toSessionId: "sess-" + MARKER, principalId: "attacker-" + MARKER, principal: "attacker-" + MARKER, capabilityId: "cap-" + MARKER, scope: "admin" },
+  { marker: MARKER, reconnect: "owner", fromSessionId: "sess-owner-" + MARKER, toSessionId: "sess-" + MARKER, identityId: "attacker-" + MARKER, token: "tok-" + MARKER, principal: "attacker-" + MARKER },
+  { marker: MARKER, loopback: "rebind", fromSession: "sess-owner-" + MARKER, toSession: "sess-" + MARKER, principalId: "attacker-" + MARKER },
+];
+
+const bootstrapConversation = pick("bootstrapConversation");
+const baseScope = "write";
+let anyFired = false;
+for (const ctx of contextShapes()) {
+  const bootstrapResult = bootstrapConversation !== null && transition !== bootstrapConversation
+    ? await call(bootstrapConversation, [[ctx], [ctx, "attacker-" + MARKER], [{}]])
+    : { ok: false, ret: null, authzErr: false };
+  const bootstrapIds = asIdList(bootstrapResult.ok ? bootstrapResult.ret : []);
+  const baselineSessionIds = bootstrapIds.length ? bootstrapIds : ["sess-" + MARKER, "sess-owner-" + MARKER, "o" + MARKER];
+
+  let baselineBlocked = false;
+  for (const payload of ACTION_PAYLOADS) {
+    let sawAttempt = false;
+    for (const sid of baselineSessionIds) {
+      const request = withSessionHints(payload, sid);
+      const before = await call(action, [
+        [ctx, sid, request],
+        [ctx, sid],
+        [ctx, request],
+        [ctx, request, sid],
+        [ctx],
+        [sid, request],
+        [request, sid],
+        [request],
+        [sid],
+      ]);
+      if (before.ok && hasMarker(before.ret)) {
+        process.stdout.write("no-bac-stateful");
+        process.exit(0);
+      }
+      if (before.ok || before.authzErr) baselineBlocked = true;
+      sawAttempt = true;
+    }
+    if (!sawAttempt) baselineBlocked = true;
+  }
+  if (!baselineBlocked) continue;
+
+  const beforeSnap = snapshot();
+  for (const patch of TRANSITION_PAYLOADS) {
+    for (const mutation of transitionPayloadCandidates(patch, baselineSessionIds)) {
+      const mut = await call(transition, [
+        [ctx, mutation],
+        [mutation, ctx],
+        [ctx],
+        [mutation],
+        [ctx, mutation, mutation],
+        [mutation, mutation],
+      ]);
+      if (!mut.ok) continue;
+      const transitionTrace = asText(mut.ret).slice(0, 260);
+      const transitionIds = uniqueStrings(collectIds(mutation, []).concat(collectIds(mut.ret, [])));
+      const actionCandidates = transitionIds.length ? transitionIds : baselineSessionIds;
+      for (const id of actionCandidates) {
+        for (const payload of ACTION_PAYLOADS) {
+          const withId = withSessionHints(payload, id);
+          withId.capabilityId = withId.capabilityId || id;
+          const before = await call(action, [
+            [ctx, id, withId],
+            [ctx, id],
+            [ctx, withId],
+            [ctx, withId, id],
+            [withId],
+            [id, withId],
+            [withId, id],
+            [withId, id, withId],
+            [id],
+          ]);
+          if (!before.ok || !hasMarker(before.ret)) continue;
+          const principalId = (ctx && (ctx.identity || ctx.principal || (ctx.user && ctx.user.identity) || ctx.userId || "attacker-" + MARKER));
+          const finalSnap = snapshot();
+          const beforeIds = uniqueStrings(collectIds(beforeSnap, [])).filter((x) => x.length > 0);
+          const afterIds = uniqueStrings(collectIds(finalSnap, []));
+          const transitionEvidenceIds = uniqueStrings(collectIds(mut.ret, []));
+          const principalEvidenceIds = uniqueStrings([
+            principalId,
+            ...collectIds(transition, []),
+            ...collectIds(mut.ret || {}, []),
+            ...collectIds(before.ret || {}, []),
+          ]);
+          const evidence = {
+            action: ${A},
+            transition: ${T},
+            principal: principalId,
+            baselineScope: baseScope,
+            transitionResult: transitionTrace,
+            transitionIds: transitionIds,
+            preTransitionStateIds: beforeIds,
+            postTransitionStateIds: afterIds,
+            transitionEvidenceIds,
+            principalIds: principalEvidenceIds,
+            scopeTrace: [
+              { step: "before-action", ids: beforeIds },
+              { step: "after-transition", ids: afterIds },
+              { step: "after-exploit", ids: transitionEvidenceIds },
+            ],
+            before: beforeSnap.slice(0, 420),
+            after: finalSnap.slice(0, 420),
+          };
+          process.stdout.write("BAC_STATEFUL_FIRED " + JSON.stringify(evidence));
+          anyFired = true;
+          process.exit(0);
+        }
+      }
+    }
+    if (anyFired) break;
+  }
+  if (anyFired) break;
+}
+if (!anyFired) process.stdout.write("no-bac-stateful");
+`.trim();
+}
+
 export class BrokenAccessControlAttacker implements Attacker {
   readonly attackClass = "broken-access-control" as const;
   readonly canaryFixtureDir = resolve(HERE, "..", "..", "fixtures", "broken-access-control-node");
@@ -361,16 +657,20 @@ export class BrokenAccessControlAttacker implements Attacker {
       const units = functionUnits(source);
       const bodyByName = new Map(units.map((u) => [u.name, u.body]));
       const harness = new Set(units.filter((u) => HARNESS_BODY_RE.test(u.body)).map((u) => u.name));
-      const entries: Entry[] = units
+      const allEntries: Entry[] = units
         .filter((u) => exported.has(u.name))
         .map((u) => ({
           name: u.name,
+          body: u.body,
           line: u.line,
           scopes: bodyScopes(u.body),
           // Inter-procedural: reach effects buried behind up to 3 hops of internal helpers.
           effects: closureEffects(u.name, bodyByName, harness, 3, new Set()),
-        }))
-        .filter((e) => e.effects.size > 0);
+        }));
+      const entries: Entry[] = allEntries.filter((e) => e.effects.size > 0);
+      if (entries.length === 0 && allEntries.length === 0) {
+        continue;
+      }
 
       const candidates = differentialCandidates(entries).slice(0, 8); // cost-control cap
       for (const cand of candidates) {
@@ -397,6 +697,45 @@ export class BrokenAccessControlAttacker implements Attacker {
             out.slice(0, 700),
         });
         break; // one proven differential per file is enough to fail the gate
+      }
+
+      if (exploits.length > 0) {
+        continue;
+      }
+
+      const statefulActions = allEntries
+        .filter((e) => isPrivilegedAction(e) && !HARNESS_BODY_RE.test(e.body))
+        .slice(0, 4);
+      const statefulTransitions = allEntries.filter((e) => hasStateTransitionHint(e) && !HARNESS_BODY_RE.test(e.body)).slice(0, 4);
+      if (statefulActions.length === 0 || statefulTransitions.length === 0) {
+        continue;
+      }
+      for (const action of statefulActions) {
+        if (exploits.length > 0) break;
+        for (const transition of statefulTransitions) {
+          if (exploits.length > 0) break;
+          if (action.name === transition.name) continue;
+          const marker = freshMarker();
+          const driverRel = `.raeuber-bac-state-${marker}.mjs`;
+          sandbox.writeFile(driverRel, bacStatefulDriver(file, action.name, transition.name, marker));
+          const run = sandbox.exec(`${NODE_RUN} ${driverRel} 2>&1`, 15_000);
+          const out = run.stdout + run.stderr;
+          if (!out.includes("BAC_STATEFUL_FIRED")) continue;
+          const baselineScope = action.scopes.length ? action.scopes.join("+") : "(no authorization check)";
+          exploits.push({
+            attackClass: "broken-access-control",
+            proof: "privilege-escalated",
+            file,
+            line: action.line,
+            sink: `stateful-access-control(${action.name} via ${transition.name})`,
+            summary:
+              `Exported control-plane transition function \`${transition.name}()\` can rewrite capability provenance for \`${action.name}()\` ` +
+              `from \`${baselineScope}\` to an effective higher scope, allowing lower-privilege callers to execute a privileged action after reconnect/replay-style transitions.`,
+            payload: `${transition.name}({ sessionId: "sess-${marker}", action: "${marker}" }) → ${action.name}({ ... }, { marker: "${marker}" })`,
+            evidence: out.slice(0, 900),
+          });
+          break;
+        }
       }
     }
     return exploits;

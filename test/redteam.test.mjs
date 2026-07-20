@@ -383,6 +383,7 @@ describe("raeuberkrebs resource-exhaustion gate (Swift lane)", () => {
 });
 
 const SQLI_SWIFT_FIXTURE = join(ROOT, "fixtures", "sql-injection-swift");
+const SQLI_FIXTURE = join(ROOT, "fixtures", "sql-injection-node");
 
 describe("raeuberkrebs sql-injection gate (Swift lane)", () => {
   it("fires on the planted Swift fixture — an OR '1'='1 payload bypasses WHERE (secret-exfiltrated)", () => {
@@ -417,6 +418,62 @@ describe("raeuberkrebs sql-injection gate (Swift lane)", () => {
     try {
       const r = runRedteam(dir, ["safe.swift"], LOCAL);
       assert.equal(r.exploits.length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("raeuberkrebs sql-injection gate (Node lane)", () => {
+  it("fires on the planted Node fixture — UNION/boolean payload changed query output", () => {
+    const r = runRedteam(SQLI_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "sql-injection");
+    assert.ok(e, "expected a sql-injection exploit");
+    assert.equal(e.proof, "secret-exfiltrated");
+    assert.match(e.payload, /RAEUBER_/);
+  });
+
+  it("fires on NOVEL code — query string concatenation reaches execute", () => {
+    const dir = scratch({
+      "app.js":
+        "const { DatabaseSync } = require('node:sqlite');\n" +
+        "const db = new DatabaseSync(':memory:');\n" +
+        "db.exec(\"CREATE TABLE items(name TEXT, secret TEXT)\");\n" +
+        "db.exec(\"INSERT INTO items VALUES('public', 'ok')\");\n" +
+        "db.exec(\"INSERT INTO items VALUES('admin', 'db_secret')\");\n" +
+        "function getSecret(name){\n" +
+        "  const sql = \"SELECT secret FROM items WHERE name = '\" + name + "\"'\";\n" +
+        "  return db.prepare(sql).all().map((r) => r.secret).join(',');\n" +
+        "}\n" +
+        "module.exports = { getSecret };\n",
+    });
+    try {
+      const r = runRedteam(dir, ["app.js"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      assert.ok(r.exploits.some((x) => x.attackClass === "sql-injection"), "expected sql-injection on novel concatenation");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire on a parameterized query (no false positive)", () => {
+    const dir = scratch({
+      "safe.js":
+        "const { DatabaseSync } = require('node:sqlite');\n" +
+        "const db = new DatabaseSync(':memory:');\n" +
+        "db.exec(\"CREATE TABLE items(name TEXT, secret TEXT)\");\n" +
+        "db.exec(\"INSERT INTO items VALUES('public', 'ok')\");\n" +
+        "function safe(name){\n" +
+        "  const stmt = db.prepare('SELECT secret FROM items WHERE name = ?');\n" +
+        "  return stmt.all(name).map((r) => r.secret).join(',');\n" +
+        "}\n" +
+        "module.exports = { safe };\n",
+    });
+    try {
+      const r = runRedteam(dir, ["safe.js"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "sql-injection").length, 0, "parameterized query should not be vulnerable");
       assert.notEqual(r.verdict, "vulnerable");
     } finally {
       rmSync(dir, { recursive: true, force: true });

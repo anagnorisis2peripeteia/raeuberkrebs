@@ -6,7 +6,7 @@ import type { Sandbox } from "../sandbox.js";
 import {
   type Attacker,
   type StaticLead,
-  NODE_RUN,
+  nodeRunCommand,
   NODE_SOURCE_RE,
   freshMarker,
   nodeExportedNames,
@@ -104,7 +104,7 @@ export class SqlInjectionAttacker implements Attacker {
         const marker = freshMarker();
         const driverRel = `.raeuber-sqli-${marker}.mjs`;
         sandbox.writeFile(driverRel, sqlDriver(file, name, marker));
-        const run = sandbox.exec(`${NODE_RUN} ${driverRel} 2>&1`, 15_000);
+        const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 15_000);
         const out = run.stdout + run.stderr;
         if (!out.includes("SQLI_FIRED")) continue;
 

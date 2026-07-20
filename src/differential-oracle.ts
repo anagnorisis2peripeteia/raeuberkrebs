@@ -15,7 +15,7 @@
 // generation, sandbox orchestration, divergence parsing, and Exploit construction. See PLAYBOOK.md
 // for how to instantiate one on a new target.
 import type { Attacker, StaticLead } from "./attackers/attacker.js";
-import { NODE_RUN, freshMarker } from "./attackers/attacker.js";
+import { nodeRunCommand, freshMarker } from "./attackers/attacker.js";
 import type { Sandbox } from "./sandbox.js";
 import type { AttackClass, Exploit } from "./types.js";
 
@@ -96,7 +96,7 @@ export function differentialOracleAttacker(spec: DifferentialOracleSpec): Attack
     canaryFixtureDir: spec.canaryFixtureDir,
     handles: (file) => spec.handles(file),
     staticLeads: (source) => (spec.staticLeads ? spec.staticLeads(source) : []),
-    hunt(_targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
+    hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
       const exploits: Exploit[] = [];
       const seen = new Set<string>();
       for (const file of files) {
@@ -104,7 +104,7 @@ export function differentialOracleAttacker(spec: DifferentialOracleSpec): Attack
         const marker = freshMarker();
         const driverRel = `.raeuber-oracle-${marker}.mjs`;
         sandbox.writeFile(driverRel, buildOracleDriver(spec, file, marker));
-        const run = sandbox.exec(`${NODE_RUN} ${driverRel} 2>&1`, 20_000);
+        const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 20_000);
         const out = run.stdout + run.stderr;
         for (const rawLine of out.split("\n")) {
           const matched = rawLine.match(/^RK_DIVERGENCE (.+)$/);

@@ -6,7 +6,7 @@ import type { Sandbox } from "../sandbox.js";
 import {
   type Attacker,
   type StaticLead,
-  NODE_RUN,
+  nodeRunCommand,
   NODE_SOURCE_RE,
   freshMarker,
   nodeExportedNames,
@@ -169,7 +169,7 @@ export class UnsafeExecAttacker implements Attacker {
         for (const candidate of markerPayload(freshMarker())) {
           const driverRel = `.raeuber-driver-${freshMarker()}.mjs`;
           sandbox.writeFile(driverRel, nodeImportDriver(file, name, candidate.payload));
-          const run = sandbox.exec(`${NODE_RUN} ${driverRel} 2>&1`, 15_000);
+          const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 15_000);
           const out = run.stdout + run.stderr;
           if (out.includes(candidate.marker)) {
             exploits.push({

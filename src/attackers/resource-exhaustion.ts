@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, NODE_RUN, NODE_SOURCE_RE, freshMarker, nodeExportedNames } from "./attacker.js";
+import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames } from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -216,7 +216,7 @@ export class ResourceExhaustionAttacker implements Attacker {
           const marker = freshMarker();
           const driverRel = `.raeuber-redos-${marker}.mjs`;
           sandbox.writeFile(driverRel, redosDriver(file, name, marker));
-          const run = sandbox.exec(`${NODE_RUN} ${driverRel} 2>&1`, ResourceExhaustionAttacker.BUDGET_MS);
+          const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, ResourceExhaustionAttacker.BUDGET_MS);
           const out = run.stdout + run.stderr;
           const benignRan = out.includes("BENIGN_OK") && !out.includes("SLOW_BASELINE");
           const measured = out.includes("REDOS_FIRED");
@@ -246,7 +246,7 @@ export class ResourceExhaustionAttacker implements Attacker {
         const jsonMarker = freshMarker();
         const jsonDriverRel = `.raeuber-deep-json-${jsonMarker}.mjs`;
         sandbox.writeFile(jsonDriverRel, deepJsonDriver(file, name, jsonMarker));
-        const runJson = sandbox.exec(`${NODE_RUN} ${jsonDriverRel} 2>&1`, ResourceExhaustionAttacker.BUDGET_MS);
+        const runJson = sandbox.exec(`${nodeRunCommand(targetDir)} ${jsonDriverRel} 2>&1`, ResourceExhaustionAttacker.BUDGET_MS);
         const outJson = runJson.stdout + runJson.stderr;
         const benignJson = outJson.includes("BENIGN_OK") && !outJson.includes("SLOW_BASELINE");
         const measuredJson = outJson.includes("DEEP_JSON_FIRED");

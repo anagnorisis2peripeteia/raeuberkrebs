@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, NODE_RUN, NODE_SOURCE_RE, freshMarker, nodeExportedNames } from "./attacker.js";
+import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames } from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -308,7 +308,7 @@ export class SsrfAttacker implements Attacker {
         const driverRel = `.raeuber-driver-${marker}.mjs`;
         const boundaryRel = `.raeuber-boundary-${marker}.mjs`;
         sandbox.writeFile(boundaryRel, ssrfBoundaryDriver(file, name, marker));
-        const boundaryRun = sandbox.exec(`${NODE_RUN} ${boundaryRel} 2>&1`, 25_000);
+        const boundaryRun = sandbox.exec(`${nodeRunCommand(targetDir)} ${boundaryRel} 2>&1`, 25_000);
         const boundaryOut = boundaryRun.stdout + boundaryRun.stderr;
         if (boundaryOut.includes("BOUNDARY_BYPASS") && boundaryOut.includes("payload=")) {
           const payload = boundaryOut.match(/payload=(\S+)/)?.[1] ?? `http://127.0.0.1/${marker}`;
@@ -335,7 +335,7 @@ export class SsrfAttacker implements Attacker {
         }
 
         sandbox.writeFile(driverRel, ssrfCanaryDriver(file, name, marker));
-        const run = sandbox.exec(`${NODE_RUN} ${driverRel} 2>&1`, 20_000);
+        const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 20_000);
         const out = run.stdout + run.stderr;
         if (out.includes("OOB_FIRED") && out.includes(marker)) {
           const payload = out.match(/OOB_FIRED payload=(\S+)/)?.[1] ?? `http://127.0.0.1/${marker}`;

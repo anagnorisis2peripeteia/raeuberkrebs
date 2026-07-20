@@ -6,7 +6,7 @@ import type { Sandbox } from "../sandbox.js";
 import {
   type Attacker,
   type StaticLead,
-  NODE_RUN,
+  nodeRunCommand,
   NODE_SOURCE_RE,
   freshMarker,
   nodeExportedNames,
@@ -189,7 +189,7 @@ export class ExecAuthorizationAttacker implements Attacker {
         const marker = freshMarker();
         const driver = `.raeuber-exec-authz-${marker}.mjs`;
         sandbox.writeFile(driver, execAuthorizationDriver(file, fn.name, marker));
-        const run = sandbox.exec(`${NODE_RUN} ${driver} 2>&1`, 15_000);
+        const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driver} 2>&1`, 15_000);
         const out = run.stdout + run.stderr;
         const m = out.match(/AUTHZ_DIFF_FIRED (\{.*\})/);
         if (!m) continue;

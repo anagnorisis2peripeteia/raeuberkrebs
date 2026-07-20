@@ -28,6 +28,8 @@ export interface Sandbox {
   readonly name: string;
   /** True for a hardened sandbox (crabbox); false for the reduced-isolation local copy. */
   readonly isolated: boolean;
+  /** Replace sandbox contents with a fresh copy of `sourceDir`. */
+  seedDir(sourceDir: string): void;
   /** Write a file (e.g. a generated PoC driver) INTO the sandbox's working copy, relative to it. */
   writeFile(relPath: string, contents: string): void;
   /** Run a shell command with the (sandboxed copy of the) target as cwd. */
@@ -84,6 +86,11 @@ class LocalSandbox implements Sandbox {
   constructor(targetDir: string) {
     this.work = mkdtempSync(join(tmpdir(), "raeuber-"));
     cpSync(targetDir, this.work, { recursive: true });
+  }
+
+  seedDir(sourceDir: string): void {
+    rmSync(this.work, { recursive: true, force: true });
+    cpSync(sourceDir, this.work, { recursive: true });
   }
 
   writeFile(relPath: string, contents: string): void {
@@ -178,9 +185,19 @@ class CrabboxSandbox implements Sandbox {
       this.dispose();
       throw new Error(`crabbox mkdir failed: ${mk.stderr || mk.stdout}`);
     }
+    this.seedDir(targetDir);
+  }
+
+  seedDir(sourceDir: string): void {
+    const mk = this.remote(`rm -rf ${REMOTE_DIR} && mkdir -p ${REMOTE_DIR}`, 60_000);
+    if (mk.exitCode !== 0) throw new Error(`crabbox seed clear failed: ${mk.stderr || mk.stdout}`);
+
     const copy = spawnSync(
       "bash",
-      ["-c", `tar -C ${shq(targetDir)} -cf - . | ${this.sshCmd} 'tar -C ${REMOTE_DIR} -xf -'`],
+      [
+        "-c",
+        `tar -C ${shq(sourceDir)} -cf - . | ${this.sshCmd} 'tar -C ${REMOTE_DIR} -xf -'`,
+      ],
       { encoding: "utf8", timeout: 5 * 60_000, maxBuffer: 64 * 1024 * 1024 },
     );
     if (copy.status !== 0) {

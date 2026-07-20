@@ -6,7 +6,7 @@ import type { Sandbox } from "../sandbox.js";
 import {
   type Attacker,
   type StaticLead,
-  NODE_RUN,
+  nodeRunCommand,
   NODE_SOURCE_RE,
   freshMarker,
   nodeExportedNames,
@@ -293,7 +293,7 @@ export class SecondaryInterpreterAttacker implements Attacker {
         const marker = freshMarker();
         const driver = `.raeuber-secondary-${marker}.mjs`;
         sandbox.writeFile(driver, probeTemplate(file, name, marker));
-        const run = sandbox.exec(`${NODE_RUN} ${driver} 2>&1`, 15_000);
+        const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driver} 2>&1`, 15_000);
         const out = run.stdout + run.stderr;
         const m = out.match(/SI_FIRED (\{[^]*\})/);
         if (!m) continue;

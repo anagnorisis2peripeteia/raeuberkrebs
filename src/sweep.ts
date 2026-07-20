@@ -10,7 +10,7 @@ import type { AttackClass } from "./types.js";
 // prove phase, never a finding. This is the cost control the crabbox lesson demands: the
 // deterministic sweep is free, so the LLM+sandbox fan-out only ever touches the density head.
 
-const SOURCE_EXTS = ["ts", "mts", "cts", "js", "cjs", "mjs", "cs", "swift"];
+const SOURCE_EXTS = ["ts", "mts", "cts", "js", "cjs", "mjs", "cs", "swift", "py", "go"];
 // Exclude tests/fixtures/build output/vendored code — same spirit as the gate's scope.
 const SKIP_RE =
   /(\.test\.|\.spec\.|-harness\.|(^|\/)test-support\/|(^|\/)tests?\/|(^|\/)__tests__\/|(^|\/)e2e\/|(^|\/)fixtures?\/|(^|\/)scripts?\/|(^|\/)dist\/|(^|\/)build\/|(^|\/)node_modules\/|(^|\/)\.git\/|(^|\/)\.agents\/|\.d\.ts$)/;

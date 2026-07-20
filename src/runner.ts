@@ -3,9 +3,13 @@ import { openSandbox, type Sandbox, type SandboxOptions } from "./sandbox.js";
 import type { Attacker } from "./attackers/attacker.js";
 import { CommandInjectionAttacker } from "./attackers/command-injection.js";
 import { CommandInjectionDotnetAttacker } from "./attackers/command-injection-dotnet.js";
+import { CommandInjectionGoAttacker } from "./attackers/command-injection-go.js";
 import { CommandInjectionSwiftAttacker } from "./attackers/command-injection-swift.js";
+import { CommandInjectionPythonAttacker } from "./attackers/command-injection-python.js";
 import { PathTraversalSwiftAttacker } from "./attackers/path-traversal-swift.js";
 import { PathTraversalAttacker } from "./attackers/path-traversal.js";
+import { PathTraversalGoAttacker } from "./attackers/path-traversal-go.js";
+import { PathTraversalPythonAttacker } from "./attackers/path-traversal-python.js";
 import { SsrfSwiftAttacker } from "./attackers/ssrf-swift.js";
 import { ResourceExhaustionSwiftAttacker } from "./attackers/resource-exhaustion-swift.js";
 import { SqlInjectionSwiftAttacker } from "./attackers/sql-injection-swift.js";
@@ -48,12 +52,16 @@ import {
 } from "./attackers/dotnet-more-lanes.js";
 import type { Exploit, LaneStatus, RaeuberResult, Verdict } from "./types.js";
 
-/** The registered attack lanes (Node + .NET). */
+/** The registered attack lanes (Node, Swift, Python, Go, and .NET). */
 export const ATTACKERS: Attacker[] = [
   new CommandInjectionAttacker(),
   new CommandInjectionDotnetAttacker(),
   new CommandInjectionSwiftAttacker(),
+  new CommandInjectionPythonAttacker(),
+  new CommandInjectionGoAttacker(),
   new PathTraversalSwiftAttacker(),
+  new PathTraversalPythonAttacker(),
+  new PathTraversalGoAttacker(),
   new PathTraversalAttacker(),
   new UnsafeExecAttacker(),
   new SsrfSwiftAttacker(),
@@ -119,6 +127,11 @@ function handledFilesIn(dir: string, attacker: Attacker): string[] {
   return readdirSync(dir).filter((f) => attacker.handles(f));
 }
 
+function sandboxOptionsFor(attacker: Attacker, base: SandboxOptions): SandboxOptions {
+  if (!attacker.sandboxImage) return base;
+  return { ...base, crabboxImage: attacker.sandboxImage };
+}
+
 /**
  * Prove a lane is LIVE: open a sandbox over the lane's planted-vulnerable fixture and attack it. A
  * live lane MUST produce at least one exploit against its own planted vuln, else it is quarantined
@@ -180,7 +193,7 @@ export function runRedteam(
   }
 
   for (const attacker of applicable) {
-    const box = openSandbox(targetDir, sbox);
+    const box = openSandbox(targetDir, sandboxOptionsFor(attacker, sbox));
     try {
       const liveness = proveLaneLive(attacker, box);
       sandboxName = liveness.sandbox;

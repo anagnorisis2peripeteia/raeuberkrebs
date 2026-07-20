@@ -142,10 +142,22 @@ class CrabboxSandbox implements Sandbox {
     this.provider = provider;
     this.slug = "raeuber-" + randomBytes(5).toString("hex");
     this.name = `crabbox:${provider === "apple" ? "apple-container" : provider}`;
+    const isAppleContainer = provider === "apple" || provider === "apple-container";
+    const extraRunArgs: string[] =
+      isAppleContainer ? ["--apple-container-extra-run-args", "--network=none"] : [];
 
     // 1) Lease a throwaway box whose image carries the lane runtime (node by default).
     const warm = crabbox(
-      ["warmup", "--provider", provider, "--slug", this.slug, "--apple-container-image", image],
+      [
+        "warmup",
+        "--provider",
+        provider,
+        "--slug",
+        this.slug,
+        ...extraRunArgs,
+        "--apple-container-image",
+        image,
+      ],
       5 * 60_000,
     );
     if (warm.status !== 0 || !/lease=cbx_/.test(warm.stdout + warm.stderr)) {

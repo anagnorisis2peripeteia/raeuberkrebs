@@ -19,6 +19,7 @@ import { UnsafeExecAttacker } from "./attackers/unsafe-exec.js";
 import { ResourceExhaustionAttacker } from "./attackers/resource-exhaustion.js";
 import { PrototypePollutionAttacker } from "./attackers/prototype-pollution.js";
 import { ZipSlipAttacker } from "./attackers/zip-slip.js";
+import { SqlInjectionAttacker } from "./attackers/sql-injection.js";
 import { StoredTaintAttacker } from "./attackers/stored-taint.js";
 import { PolicyBeliefDivergenceAttacker } from "./attackers/policy-belief-divergence.js";
 import { SsrfDotnetAttacker } from "./attackers/ssrf-dotnet.js";
@@ -61,6 +62,7 @@ export const ATTACKERS: Attacker[] = [
   new CsvInjectionSwiftAttacker(),
   new SsrfAttacker(),
   new CsvInjectionAttacker(),
+  new SqlInjectionAttacker(),
   new SecondaryInterpreterAttacker(),
   new ControlPlaneAttacker(),
   new ExecAuthorizationAttacker(),

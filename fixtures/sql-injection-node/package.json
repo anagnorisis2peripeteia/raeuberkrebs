@@ -1,0 +1,7 @@
+{
+  "name": "sql-injection-node-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Planted SQL-injection fixture for Node lane."
+}

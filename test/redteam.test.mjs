@@ -30,6 +30,34 @@ function scratchModule(files) {
   return dir;
 }
 
+describe("raeuberkrebs differential-oracle (policy-belief-divergence)", () => {
+  const ORACLE_FIXTURE = join(ROOT, "fixtures", "differential-oracle-node");
+
+  it("fires when the control BELIEVES an input safe but it actually runs (belief divergence)", () => {
+    const r = runRedteam(ORACLE_FIXTURE, ["approval.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    assert.equal(r.exploits.length, 1);
+    const e = r.exploits[0];
+    assert.equal(e.attackClass, "policy-belief-divergence");
+    assert.equal(e.proof, "belief-diverged");
+    assert.match(e.evidence, /RAEUBER_[0-9a-f]+/); // the executed marker proves ground truth
+    assert.ok(e.payload.includes("command echo")); // the believed-safe-but-executing input
+  });
+
+  it("does NOT fire on a control that correctly deems the input unsafe (no false positive)", () => {
+    const dir = scratchModule({
+      "approval.js": "export function isCommandSafe(cmd){ return cmd === 'true'; }",
+    });
+    try {
+      const r = runRedteam(dir, ["approval.js"], LOCAL);
+      assert.equal(r.exploits.length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("raeuberkrebs command-injection gate", () => {
   it("fires on the planted fixture and returns a proven, evidence-bearing PoC", () => {
     const r = runRedteam(FIXTURE, ["vuln.js"], LOCAL);

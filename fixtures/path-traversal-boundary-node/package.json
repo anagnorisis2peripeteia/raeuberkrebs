@@ -1,0 +1,7 @@
+{
+  "name": "raeuber-fixture-path-traversal-boundary-node",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Planted filesystem boundary lane fixture; intentional symlink-capability weakness."
+}

@@ -13,6 +13,7 @@
     "lint": "node scripts/lint.mjs",
     "validate:attacker": "node scripts/validate-attacker.mjs",
     "validate:attackers": "node scripts/validate-attacker.mjs --all",
+    "taint:sweep": "node scripts/taint-sweep.mjs",
     "verify:crabbox": "node scripts/verify-crabbox.mjs"
   },
   "engines": {

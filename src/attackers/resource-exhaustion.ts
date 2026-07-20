@@ -54,18 +54,22 @@ function deepJsonLeads(source: string): StaticLead[] {
  * Detect catastrophic backtracking by its TIME SIGNATURE, fast — no multi-second hang. Establish a
  * benign baseline (the function must be quick on normal input, else it is always-slow, not a ReDoS),
  * then feed SHORT evil inputs of increasing length across several char classes: a linear regex stays
- * sub-millisecond, a catastrophic one crosses the threshold within a few extra characters. Fired = a
- * short crafted input costs > THRESHOLD_MS while benign is fast. The ascending lengths mean detection
- * happens the instant the blowup crosses the line (usually < 1s), and the sandbox budget is the
- * backstop for an input that jumps straight past it.
+ * predictable, a catastrophic one crosses the threshold within a few extra characters. Fired = a short
+ * crafted input consistently exceeds a stable baseline by a margin and budget, while benign inputs stay
+ * fast. To reduce timing noise, every candidate is measured 3 times and a median is used for both
+ * baseline and candidate.
  */
 function redosDriver(moduleRel: string, fnName: string, marker: string): string {
   const mod = JSON.stringify("./" + moduleRel);
   const F = JSON.stringify(fnName);
   const MK = JSON.stringify(marker);
   return `
+const SAMPLE_COUNT = 4;
 const MARKER = ${MK};
-const THRESHOLD_MS = 400;
+const ABS_THRESHOLD_MS = 400;
+const BASELINE_THRESHOLD_MS = 250;
+const BASELINE_FACTOR = 6;
+const SLOPE_MARGIN_MS = 250;
 let m;
 try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }
 function pick(n){ if (m && typeof m[n]==="function") return m[n]; if (m && m.default && typeof m.default[n]==="function") return m.default[n]; return null; }
@@ -73,12 +77,33 @@ const fn = pick(${F});
 if (!fn) { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
 function shapes(v){ return [ [v], [{ input: v, text: v, value: v, query: v, name: v, pattern: v, content: v, url: v }], [v, v] ]; }
 async function callAll(v){ for (const a of shapes(v)){ try { await fn(...a); } catch(e){} } }
-// benign baseline — a normal input must be fast, else the function is always-slow (not an input-driven ReDoS)
-const b0 = Date.now();
-await callAll("a normal short value " + MARKER);
-const benignMs = Date.now()-b0;
-process.stdout.write("BENIGN_OK ms=" + benignMs + "\\n");
-if (benignMs > 250){ process.stdout.write("SLOW_BASELINE — not input-driven\\n"); process.exit(0); }
+async function sample(v){
+  const samples = [];
+  for (let i = 0; i < SAMPLE_COUNT; i++) {
+    const s = Date.now();
+    await callAll(v);
+    samples.push(Date.now()-s);
+  }
+  samples.sort((a,b)=>a-b);
+  return samples[Math.floor(samples.length / 2)];
+}
+function hitThreshold(base, sample) {
+  const ratio = Math.max(sample / Math.max(base, 1), 1);
+  return (
+    sample > ABS_THRESHOLD_MS &&
+    (ratio >= BASELINE_FACTOR || sample >= base + SLOPE_MARGIN_MS)
+  );
+}
+
+// benign baseline — 3 short values; a function that's always-slow isn't input-driven ReDoS.
+const benignSamples = [
+  await sample("a normal short value " + MARKER),
+  await sample("prefix_" + MARKER + "_ok"),
+  await sample("literal-text-without-control"),
+];
+const benignMs = Math.max(...benignSamples);
+process.stdout.write("BENIGN_OK samples=" + benignSamples.join(",") + "\\n");
+if (benignMs > BASELINE_THRESHOLD_MS * 2){ process.stdout.write("SLOW_BASELINE — not input-driven\\n"); process.exit(0); }
 // evil inputs: short single-class runs + a non-matching terminator, ascending length (fire the instant one crosses)
 const classes = ["a", "1", " ", "\\t", "a1", "aA", "!a", "-"];
 const terms = ["!", "@", "\\u0000", "X", " "];
@@ -86,10 +111,8 @@ for (let n = 20; n <= 42; n++){
   for (const c of classes){
     const evil = c.repeat(Math.ceil(n / c.length)) + terms[n % terms.length];
     process.stdout.write("TRY len=" + evil.length + "\\n");
-    const s = Date.now();
-    await callAll(evil);          // a catastrophic regex either crosses THRESHOLD here or never returns (sandbox kills it)
-    const dt = Date.now()-s;
-    if (dt > THRESHOLD_MS){ process.stdout.write("REDOS_FIRED len=" + evil.length + " ms=" + dt + "\\n"); process.exit(0); }
+    const dt = await sample(evil); // a catastrophic regex either crosses threshold here or never returns (sandbox kills it)
+    if (hitThreshold(benignMs, dt)) { process.stdout.write("REDOS_FIRED len=" + evil.length + " ms=" + dt + " baseline=" + benignMs + "\\n"); process.exit(0); }
   }
 }
 process.stdout.write("COMPLETED no-redos\\n");

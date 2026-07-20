@@ -477,6 +477,7 @@ describe("raeuberkrebs path-traversal gate (filesystem boundary differential)", 
 });
 
 const SSRF_FIXTURE = join(ROOT, "fixtures", "ssrf-node");
+const SSRF_BOUNDARY_FIXTURE = join(ROOT, "fixtures", "ssrf-boundary-node");
 
 describe("raeuberkrebs ssrf gate", () => {
   it("fires on the planted fixture — an untrusted URL reaches an outbound fetch (oob-request)", () => {
@@ -506,6 +507,20 @@ describe("raeuberkrebs ssrf gate", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  describe("raeuberkrebs ssrf gate (trust-boundary differential)", () => {
+    it("fires on the boundary fixture when alternate URL encodings hit a distinct destination with secret forwarding", () => {
+      const r = runRedteam(SSRF_BOUNDARY_FIXTURE, ["vuln.js"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find((x) => x.attackClass === "ssrf");
+      assert.ok(e, "expected an ssrf boundary-bypass exploit");
+      assert.equal(e.proof, "oob-request");
+      assert.ok(e.sink.startsWith("ssrf-boundary("));
+      assert.match(e.payload, /127\.0\.0\.1/);
+      assert.match(e.evidence, /boundary/);
+      assert.match(e.evidence, /callback=/);
+    });
   });
 });
 

@@ -13,5 +13,22 @@ function validateSafe(input) {
   return /^a+$/.test(input);
 }
 
+// JSON parser path: unbounded parse of nested user-controlled JSON can cause resource exhaustion on large
+// or deeply nested payloads.
+function parseUserPayload(payload) {
+  const parsed = JSON.parse(payload);
+  const walk = (node, depth = 0) => {
+    if (depth > 2500) return;
+    if (Array.isArray(node)) {
+      return node.forEach((x) => walk(x, depth + 1));
+    }
+    if (node && typeof node === "object") {
+      for (const key of Object.keys(node)) walk(node[key], depth + 1);
+    }
+  };
+  return walk(parsed);
+}
+
 module.exports.validate = validate;
 module.exports.validateSafe = validateSafe;
+module.exports.parseUserPayload = parseUserPayload;

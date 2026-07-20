@@ -23,6 +23,7 @@ import { StoredTaintAttacker } from "./attackers/stored-taint.js";
 import { PolicyBeliefDivergenceAttacker } from "./attackers/policy-belief-divergence.js";
 import { SsrfDotnetAttacker } from "./attackers/ssrf-dotnet.js";
 import { PathTraversalDotnetAttacker } from "./attackers/path-traversal-dotnet.js";
+import { SecondaryInterpreterAttacker } from "./attackers/secondary-interpreter.js";
 import { UnsafeDeserializationDotnetAttacker } from "./attackers/unsafe-deserialization-dotnet.js";
 import { UnsafeDeserializationAttacker } from "./attackers/unsafe-deserialization.js";
 import { ControlPlaneAttacker } from "./attackers/control-plane.js";
@@ -60,6 +61,7 @@ export const ATTACKERS: Attacker[] = [
   new CsvInjectionSwiftAttacker(),
   new SsrfAttacker(),
   new CsvInjectionAttacker(),
+  new SecondaryInterpreterAttacker(),
   new ControlPlaneAttacker(),
   new ExecAuthorizationAttacker(),
   new BrokenAccessControlAttacker(),

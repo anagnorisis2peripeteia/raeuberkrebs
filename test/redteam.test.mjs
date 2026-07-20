@@ -711,6 +711,69 @@ describe("raeuberkrebs csv-injection gate (models the openclaw google-meet findi
   });
 });
 
+const SI_FIXTURE = join(ROOT, "fixtures", "secondary-interpreter-node");
+
+describe("raeuberkrebs secondary-interpreter gate (SSTI / log / CSV-formula / CRLF-header)", () => {
+  it("fires on the planted canary fixture and returns a proven, evidence-bearing PoC", () => {
+    const r = runRedteam(SI_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "secondary-interpreter");
+    assert.ok(e, "expected a secondary-interpreter exploit");
+    assert.ok(e.proof === "marker-executed" || e.proof === "formula-unescaped");
+    assert.ok(["template", "log", "csv", "header"].some((f) => e.summary.toLowerCase().includes(f)));
+    assert.ok(e.payload.length > 0);
+  });
+
+  it("fires on NOVEL mixed interpreter-style code (generalizes)", () => {
+    const dir = scratch({
+      "app.js":
+        "function render(template, ctx) {\n" +
+        "  return String(template).replace(/\\{\\{\\s*([A-Za-z_$][\\w$]*)\\s*\\}\\}/g, (_,k) => String((ctx && ctx[k]) || ''));\n" +
+        "}\n" +
+        "function writeLog(v) { return console.warn(String(v)); }\n" +
+        "function toCsv(v) { return [\"id\", String(v)].join(\",\"); }\n" +
+        "function setLocation(res, value) { return res.setHeader(\"Location\", value); }\n" +
+        "module.exports = { render, writeLog, toCsv, setLocation };\n",
+    });
+    try {
+      const r = runRedteam(dir, ["app.js"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find((x) => x.attackClass === "secondary-interpreter");
+      assert.ok(e, "expected a novel secondary-interpreter exploit");
+      assert.ok(["marker-executed", "formula-unescaped"].includes(e.proof));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire when sinks are sanitized against CR/LF + formula-prefix and trusted logging", () => {
+    const dir = scratch({
+      "safe.js":
+        "function writeLog(v) {\n" +
+        "  return String(v).replace(/[\\r\\n]/g, \"\");\n" +
+        "}\n" +
+        "function render(template) {\n" +
+        "  return String(template)\n" +
+        "    .replace(/<%=\\s*value\\s*%>/g, \"safe\")\n" +
+        "    .replace(/\\{\\{\\s*value\\s*\\}\\}/g, \"safe\");\n" +
+        "}\n" +
+        "function toCsv(v) {\n" +
+        "  const safe = String(v);\n" +
+        "  return [\"id\", (/^[=+@-]/.test(safe) ? \"'\" + safe : safe)].join(\",\");\n" +
+        "}\n" +
+        "function setLocation(res, value) { return res.setHeader(\"Location\", String(value).replace(/[\\r\\n]/g, \"\")); }\n" +
+        "module.exports = { writeLog, render, toCsv, setLocation };\n",
+    });
+    try {
+      const r = runRedteam(dir, ["safe.js"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "secondary-interpreter").length, 0);
+      assert.ok(r.lanes.some((l) => l.attackClass === "secondary-interpreter" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const BAC_FIXTURE = join(ROOT, "fixtures", "broken-access-control-node");
 
 describe("raeuberkrebs broken-access-control gate (models the openclaw GHSA-j4mm privilege-escalation)", () => {

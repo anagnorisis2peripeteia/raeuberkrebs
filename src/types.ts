@@ -21,6 +21,7 @@ export type AttackClass =
   | "ssrf" // untrusted input controls an outbound request target
   | "unsafe-exec" // untrusted input into eval / new Function / dynamic import
   | "csv-injection" // untrusted input reaches a CSV/spreadsheet cell without formula-prefix neutralization
+  | "secondary-interpreter" // template engines / logs / headers / CSV formula with secondary-interpreter behavior
   | "broken-access-control" // a privileged effect is reachable through a path guarded WEAKER than a sibling reaching the same effect (CWE-863/862/269 — differential authorization)
   | "exec-authorization" // policy semantics diverge across command launch argv shapes (canonical flag-sequence checks can be bypassed)
   | "control-plane" // unauthorized control-plane mutations weaken runtime protections, enabling actions the caller previously couldn't execute (CWE-640/CWE-693)
@@ -52,6 +53,7 @@ export const ATTACK_CLASSES: AttackClass[] = [
   "ssrf",
   "unsafe-exec",
   "csv-injection",
+  "secondary-interpreter",
   "broken-access-control",
   "exec-authorization",
   "control-plane",

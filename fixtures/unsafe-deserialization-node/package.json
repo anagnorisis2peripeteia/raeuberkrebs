@@ -1,0 +1,7 @@
+{
+  "name": "raeuber-fixture-unsafe-deserialization-node",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Planted unsafe-deserialization fixture for the Räuberkrebs Node lane canary. The vulnerabilities are intentional."
+}

@@ -155,6 +155,64 @@ describe("raeuberkrebs unsafe-exec gate", () => {
   });
 });
 
+const UNSAFE_DESERIALIZATION_FIXTURE = join(ROOT, "fixtures", "unsafe-deserialization-node");
+
+describe("raeuberkrebs unsafe-deserialization gate", () => {
+  it("fires on the planted fixture and returns a proven, evidence-bearing PoC", () => {
+    const r = runRedteam(UNSAFE_DESERIALIZATION_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "unsafe-deserialization");
+    assert.ok(e, "expected an unsafe-deserialization exploit");
+    assert.equal(e.proof, "marker-executed");
+    assert.match(e.evidence, /RAEUBER_[0-9a-f]+/);
+  });
+
+  it("fires on NOVEL vulnerable code — a bespoke `unserialize` sink", () => {
+    const dir = scratch({
+      "app.js":
+        "function unserialize(payload){\n" +
+        "  const parsed = JSON.parse(payload);\n" +
+        "  if (typeof parsed.__rce === 'string' && parsed.__rce.startsWith('_$$ND_FUNC$$_function')) {\n" +
+        "    return Function('return ' + parsed.__rce)();\n" +
+        "  }\n" +
+        "  return parsed;\n" +
+        "}\n" +
+        "module.exports.unserialize = unserialize;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["app.js"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find((x) => x.attackClass === "unsafe-deserialization");
+      assert.ok(e, "expected an unsafe-deserialization exploit");
+      assert.equal(e.file, "app.js");
+      assert.equal(e.proof, "marker-executed");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire when reviver filters __proto__ / constructor / prototype keys", () => {
+    const dir = scratch({
+      "safe.js":
+        "function parseSafe(payload){\n" +
+        "  return JSON.parse(payload, function (key, value) {\n" +
+        "    if (key === '__proto__' || key === 'constructor' || key === 'prototype') return undefined;\n" +
+        "    return value;\n" +
+        "  });\n" +
+        "}\n" +
+        "module.exports.parseSafe = parseSafe;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["safe.js"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "unsafe-deserialization").length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+      assert.ok(r.lanes.some((l) => l.attackClass === "unsafe-deserialization" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
 
 describe("raeuberkrebs command-injection gate (Swift lane)", () => {

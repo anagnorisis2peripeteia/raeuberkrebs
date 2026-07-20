@@ -49,6 +49,7 @@ export const ATTACK_CLASSES: AttackClass[] = [
   "command-injection",
   "sql-injection",
   "path-traversal",
+  "zip-slip",
   "unsafe-deserialization",
   "ssrf",
   "unsafe-exec",

@@ -15,6 +15,7 @@
 /** The attack lanes. Chunk 0 ships `command-injection`; the rest are the Chunk 1 backfill. */
 export type AttackClass =
   | "command-injection" // untrusted input reaches a shell/exec sink
+  | "dotnet-security-scan" // first-pass C#/.NET security sink enumeration (Roslyn/security-scan-style signal)
   | "sql-injection" // untrusted input concatenated into a query
   | "path-traversal" // untrusted input reaches a filesystem path (../ escape)
   | "unsafe-deserialization" // untrusted bytes into pickle/yaml.load/native deserialize
@@ -47,6 +48,7 @@ export type AttackClass =
 
 export const ATTACK_CLASSES: AttackClass[] = [
   "command-injection",
+  "dotnet-security-scan",
   "sql-injection",
   "path-traversal",
   "zip-slip",

@@ -770,6 +770,55 @@ describe("raeuberkrebs broken-access-control gate (models the openclaw GHSA-j4mm
   });
 });
 
+const STORED_TAINT_FIXTURE = join(ROOT, "fixtures", "stored-taint-node");
+
+describe("raeuberkrebs stored-taint gate (CWE-20 second-order stored input)", () => {
+  it("fires on the planted second-order fixture — write then read returns the marker", () => {
+    const r = runRedteam(STORED_TAINT_FIXTURE, ["vuln.js"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "stored-taint");
+    assert.ok(e, "expected a stored-taint exploit");
+    assert.equal(e.proof, "secret-exfiltrated");
+    assert.match(e.sink, /stored-taint\(readRecord\)/);
+  });
+
+  it("fires on NOVEL write/read code with a sanitize-write then unsanitized read", () => {
+    const dir = scratch({
+      "store.js":
+        "const cache = {};\n" +
+        "function writeSession(session, input){ const id = input && input.id ? String(input.id) : Math.random().toString(36).slice(2); cache[id] = String(input && input.value || '').replace(/[^a-zA-Z0-9_-]/g, ''); return { id }; }\n" +
+        "function readSession(session, id){ return cache[id]; }\n" +
+        "module.exports.writeSession = writeSession;\nmodule.exports.readSession = readSession;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["store.js"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find((x) => x.attackClass === "stored-taint");
+      assert.ok(e, "expected stored-taint on novel write/read pair");
+      assert.match(e.sink, /stored-taint\(readSession\)/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire when the reader strips the stored payload (re-validation on output path)", () => {
+    const dir = scratch({
+      "store-safe.js":
+        "const cache = {};\n" +
+        "function writeSession(session, input){ const id = input && input.id ? String(input.id) : 's-'+Math.random().toString(36).slice(2); cache[id] = String(input && input.value || ''); return { id }; }\n" +
+        "function readSession(session, id){ const v = cache[id] || ''; return String(v).replace(/RAEUBER_[0-9a-f]+/, 'redacted'); }\n" +
+        "module.exports.writeSession = writeSession;\nmodule.exports.readSession = readSession;\n",
+    });
+    try {
+      const r = runRedteam(dir, ["store-safe.js"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "stored-taint").length, 0, "reader sanitization should prevent marker return");
+      assert.ok(r.lanes.some((l) => l.attackClass === "stored-taint" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const EXEC_AUTH_FIXTURE = join(ROOT, "fixtures", "exec-authorization-node");
 
 describe("raeuberkrebs exec-authorization gate (argv-policy differential)", () => {

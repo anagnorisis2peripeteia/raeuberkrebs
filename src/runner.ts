@@ -24,6 +24,7 @@ import { PolicyBeliefDivergenceAttacker } from "./attackers/policy-belief-diverg
 import { SsrfDotnetAttacker } from "./attackers/ssrf-dotnet.js";
 import { PathTraversalDotnetAttacker } from "./attackers/path-traversal-dotnet.js";
 import { UnsafeDeserializationDotnetAttacker } from "./attackers/unsafe-deserialization-dotnet.js";
+import { UnsafeDeserializationAttacker } from "./attackers/unsafe-deserialization.js";
 import { ControlPlaneAttacker } from "./attackers/control-plane.js";
 import { ExecAuthorizationAttacker } from "./attackers/exec-authorization.js";
 import {
@@ -66,6 +67,7 @@ export const ATTACKERS: Attacker[] = [
   new MissingAuthenticationAttacker(),
   new ResourceExhaustionAttacker(),
   new PrototypePollutionAttacker(),
+  new UnsafeDeserializationAttacker(),
   new ZipSlipAttacker(),
   new StoredTaintAttacker(),
   // Node static lanes: high-risk crypto/token weaknesses surfaced in source (issue #19). Static-only;

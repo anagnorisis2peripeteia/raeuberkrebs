@@ -1,0 +1,7 @@
+{
+  "name": "raeuber-fixture-unsafe-exec-node",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Planted unsafe-exec fixture for the Räuberkrebs Node lane canary. The vulnerability is intentional."
+}

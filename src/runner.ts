@@ -200,8 +200,14 @@ export function runRedteam(
   }
 
   for (const attacker of applicable) {
-    const box = openSandbox(targetDir, sandboxOptionsFor(attacker, sbox));
+    // openSandbox (and seedDir) copy the target tree host-side and can throw —
+    // e.g. cpSync EACCES on an unreadable file in a real checkout. Keep the box
+    // creation and the whole lane lifecycle inside the guard so such a throw is
+    // recorded as a dead lane (fail-closed) instead of escaping runRedteam: the
+    // caller must always get a serializable verdict and its report artifact.
+    let box: Sandbox | undefined;
     try {
+      box = openSandbox(targetDir, sandboxOptionsFor(attacker, sbox));
       const liveness = proveLaneLive(attacker, box);
       sandboxName = liveness.sandbox;
       if (!liveness.live) {
@@ -218,8 +224,16 @@ export function runRedteam(
         attacked: targetFiles.length,
         fired: laneExploits.length,
       });
+    } catch (err) {
+      lanes.push({
+        attackClass: attacker.attackClass,
+        live: false,
+        attacked: 0,
+        fired: 0,
+        deadReason: `sandbox lifecycle errored: ${err instanceof Error ? err.message : String(err)}`,
+      });
     } finally {
-      box.dispose();
+      box?.dispose();
     }
   }
 

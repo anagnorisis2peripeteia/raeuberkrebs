@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -185,6 +185,31 @@ describe("raeuberkrebs command-injection gate", () => {
       assert.equal(r.verdict, "clean");
       assert.equal(r.exploits.length, 0);
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Regression for #69: a host-side throw while opening/seeding the sandbox (here
+  // an unreadable file in the target tree makes cpSync raise EACCES) must NOT
+  // escape runRedteam — the lane fails closed and a serializable result is still
+  // returned, so the CLI can write its report artifact.
+  it("returns a lane-dead result when the sandbox copy throws (does not crash out)", { skip: process.getuid?.() === 0 && "root reads any file" }, () => {
+    const dir = scratch({
+      "app.js": 'const { execSync } = require("child_process");\nfunction run(cmd){ return execSync("ls " + cmd).toString(); }\nmodule.exports.run = run;\n',
+    });
+    const unreadable = join(dir, "secret.js");
+    writeFileSync(unreadable, "module.exports = 1;\n");
+    chmodSync(unreadable, 0o000);
+    try {
+      const r = runRedteam(dir, ["app.js"], LOCAL);
+      assert.ok(r, "runRedteam must return a result, not throw");
+      assert.equal(r.verdict, "lane-dead");
+      assert.ok(
+        r.lanes.some((l) => l.attackClass === "command-injection" && !l.live && /sandbox lifecycle errored/.test(l.deadReason ?? "")),
+        `expected a sandbox-lifecycle lane-dead reason, got ${JSON.stringify(r.lanes)}`,
+      );
+    } finally {
+      chmodSync(unreadable, 0o644);
       rmSync(dir, { recursive: true, force: true });
     }
   });

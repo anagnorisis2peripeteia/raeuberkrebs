@@ -11,7 +11,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // or concatenation) rather than a fixed literal. Covers global fetch, axios/got/undici, and node
 // http(s). A lead, not a finding — whether the *host* is attacker-influenced is what the PoC decides.
 const SINK_RE =
-  /\b(?:fetch|axios(?:\.(?:get|post|put|delete|patch|head|request))?|got(?:\.(?:get|post|put|delete|patch|head))?|undici\.(?:fetch|request)|https?\.(?:get|request))\s*\(\s*(?:`[^`]*\$\{|[A-Za-z_$][\w$.]*\s*[,)]|['"][^'"]*['"]\s*\+)/;
+  /\b(?:fetch|axios(?:\.(?:get|post|put|delete|patch|head|request))?|got(?:\.(?:get|post|put|delete|patch|head))?|undici\.(?:fetch|request)|https?\.(?:get|request))\s*\(\s*(?:`[^`]*\$\{|[A-Za-z_$][\w$.]*(?:\([^)]*\))?(?:\s*\+[^,)]*)?\s*[,)]|['"][^'"]*['"]\s*(?:\+|[,)]))/;
 
 // A lead whose URL begins with a FIXED `scheme://host[:port]/` literal — the host is hardcoded and
 // the variable is in the PATH (there is a `/` between the authority and the first interpolation). The

@@ -92,7 +92,7 @@ function unsafeDeserializerDriver(moduleRel: string, fnName: string, marker: str
   const mk = JSON.stringify(marker);
   const probeKey = `__raeuber_deser_${marker}`;
   const probeField = `__raeuber_proto_${marker.slice(0, 6)}`;
-  const nodeExpression = `_$$ND_FUNC$$_function(){globalThis["${probeKey}"] = ${mk}; return ${mk};}()`;
+  const nodeExpression = `_$$ND_FUNC$$_function = function(){globalThis["${probeKey}"] = ${mk}; return ${mk};}()`;
   const nodePayload = JSON.stringify({ __rce: nodeExpression });
   const yamlPayload = JSON.stringify({ __yaml_exec: `globalThis["${probeKey}"] = ${mk}; return ${mk};` });
   const reviverPayload = JSON.stringify(`{"__proto__":{"${probeField}":${mk}}}`);

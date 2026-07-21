@@ -62,8 +62,59 @@ command and checks the marker.)
   allow-listed and never unwrapped.
 - divergence: the resolver never unwrapped `watch`/`strace`/… so their inner command auto-approved.
 
+## C# (.NET) targets — the compiled-language oracle
+
+The Node oracle `import()`s a module and evaluates a JS `beliefExpr`. C# is compiled, so
+[`src/attackers/dotnet-oracle.ts`](src/attackers/dotnet-oracle.ts) instead assembles the target
+source + a generated `Driver.cs` + a csproj into an isolated console project, `dotnet build`s it, and
+runs the belief-vs-ground-truth loop in-process — the same drive-and-prove machinery the .NET
+command-injection lane uses (`dotnet.ts`). A file that needs the rest of its project to compile just
+won't build in isolation → an honest miss, never a false pass. Two shapes ship, because a C# control's
+ground truth is typed, not duck-typed:
+
+**A. Command-approval** — `differentialOracleDotnet({ ... })`, the exec-approval class in C#. Point it
+at a `bool Decision(string)` gate and supply `methodName` + `corpus` (belief = the gate returns true;
+ground truth = running the command fires the marker). Copy-me lane +
+canary: [`policy-belief-divergence-dotnet.ts`](src/attackers/policy-belief-divergence-dotnet.ts) /
+[`fixtures/differential-oracle-dotnet/Approval.cs`](fixtures/differential-oracle-dotnet/Approval.cs).
+
+```ts
+differentialOracleDotnet({
+  attackClass: "policy-belief-divergence",
+  canaryFixtureDir: <planted Approval.cs dir>,
+  handles: (f) => f === "TargetApproval.cs",
+  methodName: /^IsCommandSafe$/,          // the discovered `bool <name>(string)` gate
+  corpus: ["command echo {{MARK}}", "echo {{MARK}}"],
+})
+```
+
+**B. Authz fail-open** (the C# *differential-authorization* lane) — `authzFailOpenDotnet({ ... })`.
+Statically-typed C# has no generic duck-typed context, so the Node BAC's entrypoint-pairing doesn't
+port; the tractable, policy-free invariant is instead the **null-authority** one: a role/permission
+gate MUST deny a principal carrying no roles/claims. The lane discovers a
+`bool IsAuthorized(ClaimsPrincipal)`-shaped gate, drives it with `new ClaimsPrincipal(new
+ClaimsIdentity())`, and fires when it returns true (admitted the role-less caller, CWE-862/863). It
+needs no policy knowledge and correctly does NOT fire on a sound gate — e.g. microsoft/mcp-gateway's
+`BuiltinToolAuthorizer` (`GetUserRoles().Any(r => allowed.Contains(r))` denies the empty set). Copy-me
+lane + canary: [`authz-fail-open-dotnet.ts`](src/attackers/authz-fail-open-dotnet.ts) /
+[`fixtures/authz-fail-open-dotnet/Authorizer.cs`](fixtures/authz-fail-open-dotnet/Authorizer.cs).
+
+```ts
+authzFailOpenDotnet({
+  attackClass: "broken-access-control",
+  canaryFixtureDir: <planted Authorizer.cs dir>,
+  handles: (f) => f === "TargetAuthorizer.cs",   // methodName defaults to the common authz verbs
+})
+```
+
+Both drive-and-prove lanes need `dotnet` on the box (the sandbox must carry the SDK; the default
+apple-container node image does not — run with `{ prefer: "local" }` on a dotnet host, or a dotnet
+crabbox image). Same fail-closed liveness as every lane: the planted C# fixture must fire or the lane
+is quarantined.
+
 ## Why this is a *method*, not a push-button lane
 
 The belief half is inherently target-specific — you have to point it at the target's real decision API.
 The primitive makes the *mechanical* half (corpus run, belief-vs-truth diff, marker proof, liveness)
-reusable, so the next oracle is four fields, not a bespoke harness. That is the part that generalized.
+reusable, so the next oracle is four fields (Node) or two (compiled C#, where the belief is "the
+discovered decision method returns true"), not a bespoke harness. That is the part that generalized.

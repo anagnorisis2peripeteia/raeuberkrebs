@@ -1,4 +1,5 @@
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { openSandbox, type Sandbox, type SandboxOptions } from "./sandbox.js";
 import type { Attacker } from "./attackers/attacker.js";
 import { CommandInjectionAttacker } from "./attackers/command-injection.js";
@@ -7,6 +8,7 @@ import { CommandInjectionGoAttacker } from "./attackers/command-injection-go.js"
 import { CommandInjectionSwiftAttacker } from "./attackers/command-injection-swift.js";
 import { CommandInjectionPythonAttacker } from "./attackers/command-injection-python.js";
 import { PathTraversalSwiftAttacker } from "./attackers/path-traversal-swift.js";
+import { DifferentialOracleSwiftAttacker } from "./attackers/differential-oracle-swift.js";
 import { PathTraversalAttacker } from "./attackers/path-traversal.js";
 import { PathTraversalGoAttacker } from "./attackers/path-traversal-go.js";
 import { PathTraversalPythonAttacker } from "./attackers/path-traversal-python.js";
@@ -61,6 +63,7 @@ export const ATTACKERS: Attacker[] = [
   new CommandInjectionPythonAttacker(),
   new CommandInjectionGoAttacker(),
   new PathTraversalSwiftAttacker(),
+  new DifferentialOracleSwiftAttacker(),
   new PathTraversalPythonAttacker(),
   new PathTraversalGoAttacker(),
   new PathTraversalAttacker(),
@@ -135,6 +138,22 @@ function sandboxOptionsFor(attacker: Attacker, base: SandboxOptions): SandboxOpt
 }
 
 /**
+ * A language match alone is not enough to make a lane applicable: a TypeScript file otherwise
+ * wakes every Node attacker and pays every canary cost. Keep the execute phase tied to the same
+ * lane-specific static lead used by the free sweep.
+ */
+function filesWithLeads(targetDir: string, files: string[], attacker: Attacker): string[] {
+  return files.filter((file) => {
+    if (!attacker.handles(file)) return false;
+    try {
+      return attacker.staticLeads(readFileSync(join(targetDir, file), "utf8")).length > 0;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
  * Prove a lane is LIVE: open a sandbox over the lane's planted-vulnerable fixture and attack it. A
  * live lane MUST produce at least one exploit against its own planted vuln, else it is quarantined
  * (the family's "caught its own planted defect or it's dead" rule). Returns the sandbox identity
@@ -180,9 +199,10 @@ export function runRedteam(
   const exploits: Exploit[] = [];
   let sandboxName = "none";
 
-  const applicable = ATTACKERS.filter(
-    (a) => !a.staticOnly && changedFiles.some((f) => a.handles(f)),
-  );
+  const applicable = ATTACKERS
+    .filter((attacker) => !attacker.staticOnly)
+    .map((attacker) => ({ attacker, files: filesWithLeads(targetDir, changedFiles, attacker) }))
+    .filter(({ files }) => files.length > 0);
   if (applicable.length === 0) {
     return {
       verdict: "clean",
@@ -194,7 +214,7 @@ export function runRedteam(
     };
   }
 
-  for (const attacker of applicable) {
+  for (const { attacker, files: targetFiles } of applicable) {
     const box = openSandbox(targetDir, sandboxOptionsFor(attacker, sbox));
     try {
       const liveness = proveLaneLive(attacker, box);
@@ -204,7 +224,6 @@ export function runRedteam(
         continue;
       }
       box.seedDir(targetDir);
-      const targetFiles = changedFiles.filter((f) => attacker.handles(f));
       const laneExploits = attacker.hunt(targetDir, targetFiles, box);
       exploits.push(...laneExploits);
       lanes.push({

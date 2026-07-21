@@ -120,7 +120,13 @@ export type ExploitProof =
   // A security-decision control returned safe/allowed for an input whose benign marker then EXECUTED
   // in the sandbox — proof the control's belief diverges from actual behavior (it auto-approves
   // something that runs). Differential/observed like `privilege-escalated`: belief=safe, marker fires.
-  | "belief-diverged";
+  | "belief-diverged"
+  // A role/permission authorization gate returned true (admitted) for a NULL-AUTHORITY principal — a
+  // constructed caller carrying no roles and no claims. A correct role gate must deny the role-less
+  // caller; admitting it is a fail-open authorization bypass. Proven by driving the gate in isolation
+  // with an empty ClaimsPrincipal and observing the true return (CWE-862/863). The compiled-language
+  // (C#) authz counterpart to `privilege-escalated`, needing no knowledge of the intended policy.
+  | "authz-fail-open";
 
 /**
  * A PROVEN exploit: an adversarial payload that was executed against the changed surface in the

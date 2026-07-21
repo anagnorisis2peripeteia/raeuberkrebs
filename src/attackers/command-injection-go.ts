@@ -73,7 +73,7 @@ func main() {
       fmt.Print(recovered)
     }
   }()
-  ${fileFn}(payload)
+  fmt.Print(${fileFn}(payload))
 }
 `.trim();
 }
@@ -115,7 +115,7 @@ export class CommandInjectionGoAttacker implements Attacker {
         if (fired) break;
         const marker = freshMarker();
         const payload = payloads(marker);
-        const driverRel = `.raeuber-driver-${marker}.go`;
+        const driverRel = `raeuber-driver-${marker}.go`;
         sandbox.writeFile(driverRel, goDriver(fn.name, pkg));
         for (const p of payload) {
           const run = sandbox.exec(

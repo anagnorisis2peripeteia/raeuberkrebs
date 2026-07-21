@@ -3,13 +3,38 @@
 // that cannot fire against a known vuln would silently pass real vulnerable code — the family's
 // cardinal fail-open — so it is quarantined and this exits non-zero. Local sandbox by default (the
 // PoCs are benign); pass nothing special — this is the canary, not a target attack.
-import { readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { ATTACKERS } from "../dist/runner.js";
 import { openSandbox } from "../dist/sandbox.js";
 
 let ok = true;
 for (const attacker of ATTACKERS) {
-  const files = readdirSync(attacker.canaryFixtureDir).filter((f) => attacker.handles(f));
+  const fixtureDir = attacker.canaryFixtureDir;
+  if (!existsSync(fixtureDir)) {
+    console.error(`[validate:${attacker.attackClass}] DEAD — canary fixture dir missing: ${fixtureDir}`);
+    ok = false;
+    continue;
+  }
+
+  const files = readdirSync(fixtureDir).filter((f) => attacker.handles(f));
+  if (files.length === 0) {
+    console.error(`[validate:${attacker.attackClass}] DEAD — no canary fixture files matched this lane`);
+    ok = false;
+    continue;
+  }
+
+  if (attacker.staticOnly) {
+    const leads = files.flatMap((file) => attacker.staticLeads(readFileSync(join(fixtureDir, file), "utf8")));
+    if (leads.length > 0) {
+      console.error(`[validate:${attacker.attackClass}] LIVE (static) — ${leads.length} lead(s) matched canary fixture`);
+      continue;
+    }
+    console.error(`[validate:${attacker.attackClass}] DEAD — static canary did not match lane sink shape`);
+    ok = false;
+    continue;
+  }
+
   const box = openSandbox(attacker.canaryFixtureDir, { prefer: "local" });
   let exploits = [];
   try {

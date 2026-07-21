@@ -528,24 +528,24 @@ describe("raeuberkrebs sql-injection gate (Node lane)", () => {
   });
 
   it("fires on NOVEL code — query string concatenation reaches execute", () => {
-    const dir = scratch({
-      "app.js":
-        "const { DatabaseSync } = require('node:sqlite');\n" +
-        "const db = new DatabaseSync(':memory:');\n" +
-        "db.exec(\"CREATE TABLE items(name TEXT, secret TEXT)\");\n" +
-        "db.exec(\"INSERT INTO items VALUES('public', 'ok')\");\n" +
-        "db.exec(\"INSERT INTO items VALUES('admin', 'db_secret')\");\n" +
-        "function getSecret(name){\n" +
-        "  const sql = \"SELECT secret FROM items WHERE name = '\" + name + "\"'\";\n" +
-        "  return db.prepare(sql).all().map((r) => r.secret).join(',');\n" +
-        "}\n" +
-        "module.exports = { getSecret };\n",
-    });
-    try {
-      const r = runRedteam(dir, ["app.js"], LOCAL);
-      assert.equal(r.verdict, "vulnerable");
-      assert.ok(r.exploits.some((x) => x.attackClass === "sql-injection"), "expected sql-injection on novel concatenation");
-    } finally {
+	    const dir = scratch({
+	      "app.js":
+	        "const { DatabaseSync } = require('node:sqlite');\n" +
+	        "const db = new DatabaseSync(':memory:');\n" +
+	        "db.exec(\"CREATE TABLE items(name TEXT, secret TEXT)\");\n" +
+	        "db.exec(\"INSERT INTO items VALUES('public', 'ok')\");\n" +
+	        "db.exec(\"INSERT INTO items VALUES('admin', 'db_secret')\");\n" +
+	        "function getSecret(name){\n" +
+	        "  const sql = `SELECT secret FROM items WHERE name = '${name}'`;\n" +
+	        "  return db.prepare(sql).all().map((r) => r.secret).join(',');\n" +
+	        "}\n" +
+	        "module.exports = { getSecret };\n",
+	    });
+	    try {
+	      const r = runRedteam(dir, ["app.js"], LOCAL);
+	      assert.equal(r.verdict, "vulnerable");
+	      assert.ok(r.exploits.some((x) => x.attackClass === "sql-injection"), "expected sql-injection on novel concatenation");
+	    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -1242,7 +1242,7 @@ describe("raeuberkrebs exec-authorization gate (argv-policy differential)", () =
     });
     try {
       const r = runRedteam(dir, ["safe.js"], LOCAL);
-      assert.equal(r.exploits.filter((x) => x.attackClass === \"exec-authorization\").length, 0, "consistent policy should not fire");
+      assert.equal(r.exploits.filter((x) => x.attackClass === "exec-authorization").length, 0, "consistent policy should not fire");
       assert.notEqual(r.verdict, "vulnerable");
       assert.ok(r.lanes.some((l) => l.attackClass === "exec-authorization" && l.live));
     } finally {

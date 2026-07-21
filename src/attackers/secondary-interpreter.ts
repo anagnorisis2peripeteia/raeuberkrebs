@@ -82,8 +82,8 @@ const modRel = ${MOD};
 const fnName = ${FN};
 
 const sstiPayloads = ["{{value}}", "<%= value %>", "{{{value}}}", "{{ value }}"];
-const logPayload = "line-start\\n" + MARKER;
-const headerPayload = "https://example.com/\\r\\nX-Injected: " + MARKER;
+const logPayload = "line-start\\\\n" + MARKER;
+const headerPayload = "https://example.com/\\\\r\\\\nX-Injected: " + MARKER;
 const csvPayloads = ["=" + MARKER, "+" + MARKER, "-" + MARKER, "@" + MARKER];
 
 let m;
@@ -167,7 +167,7 @@ async function runWith(args) {
   } catch (e) {
     output = asText(e);
   }
-  const text = output + "\n" + logs.join("\n") + "\n" + headers.map((h) => h.join("=")).join("\n");
+  const text = output + "\\n" + logs.join("\\n") + "\\n" + headers.map((h) => h.join("=")).join("\\n");
   return { output, text, headers: [...headers], logs: [...logs] };
 }
 
@@ -176,18 +176,18 @@ function hasMarker(v) {
 }
 
 function hasForgedLog(v) {
-  return v.logs.some((x) => String(x).includes(MARKER) && /\r|\n/.test(String(x)));
+  return v.logs.some((x) => String(x).includes(MARKER) && /\\r|\\n/.test(String(x)));
 }
 
 function hasCrlfHeader(v) {
   return v.headers.some((pair) => {
     const h = String(pair[1] || "");
-    return h.includes(MARKER) && /\r|\n/.test(h);
+    return h.includes(MARKER) && /\\r|\\n/.test(h);
   });
 }
 
 function hasFormulaCell(v) {
-  for (const line of asText(v).split(/\r?\n/)) {
+  for (const line of asText(v).split(/\\r?\\n/)) {
     for (const cell of line.split(",")) {
       const c = String(cell).replace(/^\s*["']/, "").replace(/["']\s*$/, "");
       if (/^[=+@-]/.test(c) && c.includes(MARKER)) return true;
@@ -200,7 +200,7 @@ async function tryProbe(kind, variant, args, test) {
   const out = await runWith(args);
   if (test(out)) {
     process.stdout.write("SI_FIRED " + JSON.stringify({ kind, variant, payload: JSON.stringify(args[0]) }));
-    process.stdout.write(" \n" + out.text.slice(0, 900));
+    process.stdout.write(" \\n" + out.text.slice(0, 900));
     return true;
   }
   return false;

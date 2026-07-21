@@ -2,6 +2,7 @@ import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
 import { type Attacker, type StaticLead, scanSinkLeads } from "./attacker.js";
 import { DOTNET_SOURCE_RE } from "./dotnet.js";
+import { DOTNET_STATIC_CANARY_FIXTURE_DIR } from "./dotnet-more-lanes.js";
 
 // Unsafe-deserialization sink in C#: a deserializer that can instantiate arbitrary types from
 // attacker bytes — the classic .NET gadget surface. BinaryFormatter / LosFormatter / SoapFormatter /
@@ -18,7 +19,7 @@ const SINK_RE =
 export class UnsafeDeserializationDotnetAttacker implements Attacker {
   readonly attackClass = "unsafe-deserialization" as const;
   readonly staticOnly = true;
-  readonly canaryFixtureDir = "";
+  readonly canaryFixtureDir = DOTNET_STATIC_CANARY_FIXTURE_DIR;
 
   handles(file: string): boolean {
     return DOTNET_SOURCE_RE.test(file);

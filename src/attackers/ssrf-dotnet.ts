@@ -2,6 +2,7 @@ import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
 import { type Attacker, type StaticLead, scanSinkLeads } from "./attacker.js";
 import { DOTNET_SOURCE_RE } from "./dotnet.js";
+import { DOTNET_STATIC_CANARY_FIXTURE_DIR } from "./dotnet-more-lanes.js";
 
 // SSRF sink in C#: an outbound HTTP request whose target is a variable (not a fixed literal URL) —
 // HttpClient.*Async, WebRequest.Create, a new HttpRequestMessage. Only a LEAD; the sweep's guard-gap
@@ -18,7 +19,7 @@ const SINK_RE =
 export class SsrfDotnetAttacker implements Attacker {
   readonly attackClass = "ssrf" as const;
   readonly staticOnly = true;
-  readonly canaryFixtureDir = "";
+  readonly canaryFixtureDir = DOTNET_STATIC_CANARY_FIXTURE_DIR;
 
   handles(file: string): boolean {
     return DOTNET_SOURCE_RE.test(file);

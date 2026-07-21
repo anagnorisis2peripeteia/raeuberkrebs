@@ -94,6 +94,7 @@ function setupBoundaryWorkspace(
 function firstSuccessfulSafeProbe(
   sandbox: Sandbox,
   file: string,
+  targetDir: string,
   safeInputs: string[],
   names: string[],
   baselineMarker: string,
@@ -119,6 +120,7 @@ function runProbe(
   sandbox: Sandbox,
   file: string,
   fnName: string,
+  targetDir: string,
   payload: string,
 ): string {
   const driverRel = `.raeuber-driver-${freshMarker()}.mjs`;
@@ -168,14 +170,16 @@ export class PathTraversalAttacker implements Attacker {
       const sinkLine = firstSinkLine(source);
       const sink = (source.match(SINK_RE)?.[0] ?? "readFileSync").split("(")[0].trim();
       const safeProbeInfo: { [key: string]: string } = {};
-      const hasInRootControl = Boolean(firstSuccessfulSafeProbe(sandbox, file, topology.safeProbeInputs, names, controlMarker, safeProbeInfo));
+        const hasInRootControl = Boolean(
+          firstSuccessfulSafeProbe(sandbox, file, targetDir, topology.safeProbeInputs, names, controlMarker, safeProbeInfo),
+        );
 
       let fired = false;
       for (const name of names) {
         if (fired) break;
         if (hasInRootControl) {
           for (const p of topology.differentialInputs) {
-            const output = runProbe(sandbox, file, name, p.input);
+            const output = runProbe(sandbox, file, name, targetDir, p.input);
             if (output.includes(secret)) {
               exploits.push({
                 attackClass: "path-traversal",
@@ -202,7 +206,7 @@ export class PathTraversalAttacker implements Attacker {
 
         if (fired) break;
         for (const legacyPayload of LEGACY_PAYLOADS) {
-          const out = runProbe(sandbox, file, name, legacyPayload);
+          const out = runProbe(sandbox, file, name, targetDir, legacyPayload);
           if (out.includes(secret)) {
             exploits.push({
               attackClass: "path-traversal",

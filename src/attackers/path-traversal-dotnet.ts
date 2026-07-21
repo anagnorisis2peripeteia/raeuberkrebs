@@ -3,6 +3,7 @@ import type { Sandbox } from "../sandbox.js";
 import { type Attacker, type StaticLead, scanSinkLeads } from "./attacker.js";
 import { DOTNET_SOURCE_RE } from "./dotnet.js";
 import { UNTRUSTED_INPUT } from "./dotnet-more-lanes.js";
+import { DOTNET_STATIC_CANARY_FIXTURE_DIR } from "./dotnet-more-lanes.js";
 
 // Path-traversal sink in C#: a filesystem read/write/delete that takes a path — File.*, new
 // FileStream. Only a LEAD; the sweep's guard-gap signal is the sharpener (a file op in a file that
@@ -18,7 +19,7 @@ const SINK_RE =
 export class PathTraversalDotnetAttacker implements Attacker {
   readonly attackClass = "path-traversal" as const;
   readonly staticOnly = true;
-  readonly canaryFixtureDir = "";
+  readonly canaryFixtureDir = DOTNET_STATIC_CANARY_FIXTURE_DIR;
 
   handles(file: string): boolean {
     return DOTNET_SOURCE_RE.test(file);

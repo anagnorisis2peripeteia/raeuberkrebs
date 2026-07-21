@@ -125,10 +125,35 @@ try {
 export function nodeExportedNames(source: string): string[] {
   const re =
     /export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)|(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=|export\s+const\s+([A-Za-z_$][\w$]*)\s*=/g;
+  const objectRe = /(?:module\.exports|exports)\s*=\s*\{([\s\S]*?)\}/g;
   const names = new Set<string>();
   for (const m of source.matchAll(re)) {
     const name = m[1] || m[2] || m[3];
     if (name) names.add(name);
+  }
+  for (const m of source.matchAll(objectRe)) {
+    const objectBody = m[1] ?? "";
+    for (const raw of objectBody.split(",")) {
+      const trimmed = raw.trim();
+      if (!trimmed || trimmed === "...") continue;
+
+      const spreadMatch = trimmed.match(/^\.\.\.\s*([A-Za-z_$][\w$]*)$/);
+      if (spreadMatch) {
+        names.add(spreadMatch[1] ?? "");
+        continue;
+      }
+
+      const pairMatch = trimmed.match(
+        /^([A-Za-z_$][\w$]*)\s*:\s*([A-Za-z_$][\w$]*)$/i,
+      );
+      if (pairMatch) {
+        names.add(pairMatch[2] ?? "");
+        continue;
+      }
+
+      const shorthandMatch = trimmed.match(/^([A-Za-z_$][\w$]*)$/);
+      if (shorthandMatch) names.add(shorthandMatch[1] ?? "");
+    }
   }
   return [...names];
 }

@@ -75,7 +75,9 @@ if not callable(fn):
   raise SystemExit(0)
 
 try:
-  fn(payload)
+  r = fn(payload)
+  if r is not None:
+    print(r)
 except Exception as e:
   print(str(e))
 `.trim();

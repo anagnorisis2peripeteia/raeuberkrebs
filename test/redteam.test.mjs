@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +15,17 @@ import { sweepRepo } from "../dist/sweep.js";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE = join(ROOT, "fixtures", "command-injection-node");
 const LOCAL = { sandbox: { prefer: "local" } };
+
+// The C# drive-and-prove lanes compile with `dotnet`; skip (don't fail) their tests where the SDK is
+// absent, mirroring how the Swift lanes assume a full dev toolchain on the box that runs them.
+const HAS_DOTNET = (() => {
+  try {
+    return spawnSync("dotnet", ["--version"], { stdio: "ignore" }).status === 0;
+  } catch {
+    return false;
+  }
+})();
+const skipNoDotnet = HAS_DOTNET ? false : "dotnet SDK not available";
 
 function scratch(files) {
   const dir = mkdtempSync(join(tmpdir(), "rk-test-"));
@@ -50,6 +62,72 @@ describe("raeuberkrebs differential-oracle (policy-belief-divergence)", () => {
     });
     try {
       const r = runRedteam(dir, ["approval.js"], LOCAL);
+      assert.equal(r.exploits.length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("raeuberkrebs differential-oracle — C# command-approval (drive-and-prove)", () => {
+  const FIX = join(ROOT, "fixtures", "differential-oracle-dotnet");
+
+  it("fires when a C# approval gate believes an input safe but it actually runs", { skip: skipNoDotnet }, () => {
+    const r = runRedteam(FIX, ["Approval.cs"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    assert.equal(r.exploits.length, 1); // the `command` carrier diverges; plain `echo` is correctly deemed unsafe
+    const e = r.exploits[0];
+    assert.equal(e.attackClass, "policy-belief-divergence");
+    assert.equal(e.proof, "belief-diverged");
+    assert.match(e.evidence, /RAEUBER_[0-9a-f]+/); // the executed marker proves ground truth
+    assert.ok(e.payload.includes("command echo"));
+  });
+
+  it("does NOT fire on a sound C# gate that rejects the carrier (no false positive)", { skip: skipNoDotnet }, () => {
+    const dir = scratch({
+      // Only a literal no-op is "safe" — the `command echo` carrier is (correctly) rejected.
+      "Approval.cs":
+        "namespace RkFixture { public static class Approval {\n" +
+        "  public static bool IsCommandSafe(string cmd){ return cmd == \"true\"; }\n" +
+        "} }\n",
+    });
+    try {
+      const r = runRedteam(dir, ["Approval.cs"], LOCAL);
+      assert.equal(r.exploits.length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("raeuberkrebs differential-authz — C# authz fail-open (drive-and-prove)", () => {
+  const FIX = join(ROOT, "fixtures", "authz-fail-open-dotnet");
+
+  it("fires when a C# role gate admits the null-authority principal", { skip: skipNoDotnet }, () => {
+    const r = runRedteam(FIX, ["Authorizer.cs"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    assert.equal(r.exploits.length, 1);
+    const e = r.exploits[0];
+    assert.equal(e.attackClass, "broken-access-control");
+    assert.equal(e.proof, "authz-fail-open");
+    assert.match(e.summary, /null-authority principal|role-less caller/i);
+  });
+
+  it("does NOT fire on a sound C# gate that denies the empty role set (no false positive)", { skip: skipNoDotnet }, () => {
+    const dir = scratch({
+      "Authorizer.cs":
+        "using System.Linq;\nusing System.Security.Claims;\n" +
+        "namespace RkFixture { public static class Authorizer {\n" +
+        "  static readonly string[] Allowed = new[]{ \"admin\" };\n" +
+        // Sound shape (mirrors microsoft/mcp-gateway's BuiltinToolAuthorizer): the empty role set is denied.
+        "  public static bool IsAuthorized(ClaimsPrincipal p){\n" +
+        "    return p.Claims.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value).Any(r => Allowed.Contains(r));\n" +
+        "  }\n} }\n",
+    });
+    try {
+      const r = runRedteam(dir, ["Authorizer.cs"], LOCAL);
       assert.equal(r.exploits.length, 0);
       assert.notEqual(r.verdict, "vulnerable");
     } finally {

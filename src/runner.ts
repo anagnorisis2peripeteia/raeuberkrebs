@@ -19,6 +19,8 @@ import { ResourceExhaustionAttacker } from "./attackers/resource-exhaustion.js";
 import { PrototypePollutionAttacker } from "./attackers/prototype-pollution.js";
 import { ZipSlipAttacker } from "./attackers/zip-slip.js";
 import { PolicyBeliefDivergenceAttacker } from "./attackers/policy-belief-divergence.js";
+import { PolicyBeliefDivergenceDotnetAttacker } from "./attackers/policy-belief-divergence-dotnet.js";
+import { AuthzFailOpenDotnetAttacker } from "./attackers/authz-fail-open-dotnet.js";
 import { SsrfDotnetAttacker } from "./attackers/ssrf-dotnet.js";
 import { PathTraversalDotnetAttacker } from "./attackers/path-traversal-dotnet.js";
 import { UnsafeDeserializationDotnetAttacker } from "./attackers/unsafe-deserialization-dotnet.js";
@@ -60,9 +62,12 @@ export const ATTACKERS: Attacker[] = [
   new ResourceExhaustionAttacker(),
   new PrototypePollutionAttacker(),
   new ZipSlipAttacker(),
-  // Differential-oracle lane (already an instance, not a class): probes a security-decision control's
-  // belief vs ground truth. See src/differential-oracle.ts + PLAYBOOK.md.
+  // Differential-oracle lanes (already instances, not classes): probe a security-decision control's
+  // belief vs ground truth. Node primitive in src/differential-oracle.ts; C# drive-and-prove
+  // counterparts in src/attackers/dotnet-oracle.ts. See PLAYBOOK.md.
   PolicyBeliefDivergenceAttacker,
+  PolicyBeliefDivergenceDotnetAttacker, // C# command-approval oracle (compile + drive + fired marker)
+  AuthzFailOpenDotnetAttacker, // C# differential-authz: a role gate that admits the null-authority principal
   // C# (.NET) static lanes — feed the sweep's guard-consistency signal for the Windows node; the
   // execute-gate skips them (staticOnly), so proof is per-lead. Command-injection has its own
   // drive-and-prove .NET lane above (CommandInjectionDotnetAttacker).

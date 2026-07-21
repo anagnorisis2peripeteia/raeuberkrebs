@@ -10,6 +10,19 @@ import { openSandbox } from "../dist/sandbox.js";
 
 let ok = true;
 for (const attacker of ATTACKERS) {
+  if (!attacker.canaryFixtureDir) {
+    if (attacker.staticOnly) {
+      console.error(`[validate:${attacker.attackClass}] SKIP (static-only lane) — no canary fixture dir configured.`);
+      continue;
+    }
+    console.error(
+      `[validate:${attacker.attackClass}] DEAD — no canary fixture dir configured. ` +
+        `Quarantined: set canaryFixtureDir or remove this lane from validate scope.`,
+    );
+    ok = false;
+    continue;
+  }
+
   const fixtureDir = attacker.canaryFixtureDir;
   if (!existsSync(fixtureDir)) {
     console.error(`[validate:${attacker.attackClass}] DEAD — canary fixture dir missing: ${fixtureDir}`);
@@ -17,7 +30,18 @@ for (const attacker of ATTACKERS) {
     continue;
   }
 
-  const files = readdirSync(fixtureDir).filter((f) => attacker.handles(f));
+  let files = [];
+  try {
+    files = readdirSync(fixtureDir).filter((f) => attacker.handles(f));
+  } catch {
+    console.error(
+      `[validate:${attacker.attackClass}] DEAD — canary fixture dir missing (${fixtureDir}). ` +
+        `Quarantined: fix fixture path before this lane can gate real code.`,
+    );
+    ok = false;
+    continue;
+  }
+
   if (files.length === 0) {
     console.error(`[validate:${attacker.attackClass}] DEAD — no canary fixture files matched this lane`);
     ok = false;
@@ -35,10 +59,10 @@ for (const attacker of ATTACKERS) {
     continue;
   }
 
-  const box = openSandbox(attacker.canaryFixtureDir, { prefer: "local" });
+  const box = openSandbox(fixtureDir, { prefer: "local" });
   let exploits = [];
   try {
-    exploits = attacker.hunt(attacker.canaryFixtureDir, files, box);
+    exploits = attacker.hunt(fixtureDir, files, box);
   } finally {
     box.dispose();
   }

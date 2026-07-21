@@ -116,12 +116,19 @@ type Strategy = "fs-escape" | "exec-marker";
 function strategyFor(fn: DecisionFunction): Strategy | null {
   const rt = (fn.returnType ?? "").toLowerCase();
   const name = fn.name.toLowerCase();
-  const pathShape = /\burl\b|string/.test(rt) || /\bbool\b/.test(rt) || fn.throws;
+  const pathReturn = /\burl\b|string/.test(rt);
+  const pathName = /path|file|dir|resolve|confine|canonical|sanitize|root/.test(name);
   const boundaryBelief = CONFINEMENT_BODY_RE.test(fn.body) || CONFINEMENT_NAME_RE.test(name);
   const touchesFs = FS_TOUCH_RE.test(fn.body);
-  if (pathShape && boundaryBelief && touchesFs) return "fs-escape";
-  const execish = /exec|command|shell|run|launch|spawn/.test(name) || /Process\(|\bsystem\(/.test(fn.body);
-  if (execish && (/\bbool\b/.test(rt) || fn.throws)) return "exec-marker";
+  // fs-escape: a path-shaped (returns or names a path) confinement decision that touches the FS AND
+  // performs a real boundary check. Excludes Bool app-state checks (isApplicationRunning) that only
+  // incidentally match a boundary pattern.
+  if ((pathReturn || pathName) && boundaryBelief && touchesFs) return "fs-escape";
+  // exec-marker: a command/launch-approval gate. Belief = it approves; ground truth = running the
+  // approved input fires the benign marker.
+  const execName = /exec|command|shell|\brun\b|launch|spawn|executable|gatekeeper|approve/.test(name);
+  const execBody = /Process\(|\bsystem\(|posix_spawn|\.launch|executableURL|launchPath/.test(fn.body);
+  if ((execName || execBody) && (/\bbool\b/.test(rt) || fn.throws)) return "exec-marker";
   return null;
 }
 
@@ -201,6 +208,44 @@ for payload in ${JSON.stringify(FS_PAYLOADS)} {
 `;
 }
 
+/** The belief expression for exec-marker: TRUE when the gate approves the payload. */
+function execApprovedExpr(fn: DecisionFunction): string {
+  const rt = (fn.returnType ?? "").toLowerCase();
+  const call = callExpr(fn, "payload");
+  if (/\bbool\b/.test(rt)) return fn.throws ? `((try? ${call}) ?? false)` : `(${call})`;
+  return `((try? ${call}) != nil)`; // throws / opaque: approved == did not throw
+}
+
+/** A `main.swift` for the exec-marker strategy: the gate approved an input that actually ran. */
+function execMarkerDriver(fn: DecisionFunction): string {
+  return `import Foundation
+
+let MARK = "RK_EXEC_\\(UInt64.random(in: 0..<UInt64.max))"
+let cwd = FileManager.default.currentDirectoryPath
+// Plant a marker executable so a "launch this path" gate can be probed with a real exec.
+let markExec = cwd + "/rk-mark.sh"
+try? ("#!/bin/sh\\necho " + MARK + "\\n").write(toFile: markExec, atomically: true, encoding: .utf8)
+_ = try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: markExec)
+
+func ran(_ payload: String) -> Bool {
+  let p = Process()
+  p.executableURL = URL(fileURLWithPath: "/bin/sh")
+  p.arguments = ["-c", payload]
+  let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
+  do { try p.run(); p.waitUntilExit() } catch { return false }
+  let d = pipe.fileHandleForReading.readDataToEndOfFile()
+  return (String(data: d, encoding: .utf8) ?? "").contains(MARK)
+}
+
+let corpus = [markExec, "echo " + MARK, "/bin/sh -c 'echo " + MARK + "'"]
+for payload in corpus {
+  let approved = ${execApprovedExpr(fn)}
+  if !approved { continue }               // gate denied it -> not a bypass
+  if ran(payload) { print("RK_DIVERGENCE " + payload) }   // approved AND executed the marker
+}
+`;
+}
+
 export class DifferentialOracleSwiftAttacker implements Attacker {
   readonly attackClass = "path-traversal" as const; // confinement-decision divergence
   readonly canaryFixtureDir = resolve(HERE, "..", "..", "fixtures", "differential-oracle-swift");
@@ -234,18 +279,19 @@ export class DifferentialOracleSwiftAttacker implements Attacker {
       } catch {
         continue;
       }
-      const decisions = swiftDecisionFunctions(source).filter(
-        (fn) => strategyFor(fn) === "fs-escape",
-      );
+      const decisions = swiftDecisionFunctions(source)
+        .map((fn) => ({ fn, strat: strategyFor(fn) }))
+        .filter((d): d is { fn: DecisionFunction; strat: Strategy } => d.strat !== null);
       if (decisions.length === 0) continue;
 
-      for (const fn of decisions) {
+      for (const { fn, strat } of decisions) {
         const marker = freshMarker();
         const dir = `.rk-oracle-${marker}`;
         const bin = `${dir}/drv`;
+        const driver = strat === "fs-escape" ? fsEscapeDriver(fn) : execMarkerDriver(fn);
         sandbox.exec(`mkdir -p ${dir}`, 10_000);
         sandbox.writeFile(`${dir}/Target.swift`, source);
-        sandbox.writeFile(`${dir}/main.swift`, fsEscapeDriver(fn));
+        sandbox.writeFile(`${dir}/main.swift`, driver);
         sandbox.exec(
           `cd ${dir} && swiftc -suppress-warnings Target.swift main.swift -o drv 2>&1`,
           180_000,
@@ -258,19 +304,21 @@ export class DifferentialOracleSwiftAttacker implements Attacker {
         const diverged = [...out.matchAll(/^RK_DIVERGENCE (.+)$/gm)].map((m) => m[1].trim());
         if (diverged.length === 0) continue;
         const receiver = receiverExpr(fn);
+        const isFs = strat === "fs-escape";
         exploits.push({
-          attackClass: this.attackClass,
+          attackClass: isFs ? "path-traversal" : "command-injection",
           proof: "belief-diverged",
           file,
           line: 1,
           sink: `belief:${receiver}`,
-          summary:
-            `The confinement decision \`${receiver}()\` APPROVED ${diverged.length} path(s) whose ` +
-            `write escaped the allowed base — its belief (approved) diverges from ground truth (escaped).`,
+          summary: isFs
+            ? `The confinement decision \`${receiver}()\` APPROVED ${diverged.length} path(s) whose write escaped the allowed base — belief (approved) diverges from ground truth (escaped).`
+            : `The command/launch gate \`${receiver}()\` APPROVED ${diverged.length} input(s) that executed the benign marker — belief (approved) diverges from ground truth (executed).`,
           payload: diverged[0],
           evidence:
-            `${receiver}() returned "approved" for: ${diverged.join(", ")}\n` +
-            `but materializing each escaped the sandbox base:\n${out.slice(0, 800)}`,
+            `${receiver}() approved: ${diverged.join(", ")}\n` +
+            (isFs ? "materializing each escaped the sandbox base" : "running each fired the benign marker") +
+            `:\n${out.slice(0, 800)}`,
         });
       }
     }

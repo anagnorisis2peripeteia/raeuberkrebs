@@ -212,6 +212,7 @@ class LocalSandbox implements Sandbox {
   }
 
   seedDir(sourceDir: string): void {
+    pyEnvCache.delete(this); // a re-seed wipes the work dir (incl. any built venv) → drop the stale env
     rmSync(this.work, { recursive: true, force: true });
     this.copyInto(sourceDir);
   }
@@ -312,6 +313,7 @@ class CrabboxSandbox implements Sandbox {
   }
 
   seedDir(sourceDir: string): void {
+    pyEnvCache.delete(this); // a re-seed replaces the target content → drop any cached python env
     const mk = this.remote(`rm -rf ${REMOTE_DIR} && mkdir -p ${REMOTE_DIR}`, 60_000);
     if (mk.exitCode !== 0) throw new Error(`crabbox seed clear failed: ${mk.stderr || mk.stdout}`);
 

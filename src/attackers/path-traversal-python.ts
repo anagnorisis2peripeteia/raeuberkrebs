@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
-import type { Sandbox } from "../sandbox.js";
+import { type Sandbox, ensurePythonEnv } from "../sandbox.js";
 import {
   type Attacker,
   type StaticLead,
@@ -10,6 +10,7 @@ import {
   freshMarker,
   scanSinkLeads,
 } from "./attacker.js";
+import { PYTHON_SANDBOX_IMAGE, pythonDriver, topLevelFunctions, shq } from "./python-driver.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -26,68 +27,10 @@ function firstSinkLine(source: string): number {
   return 1;
 }
 
-interface PythonFn {
-  name: string;
-}
-
-// Top-level entrypoints we can drive in isolation.
-function topLevelFunctions(source: string): PythonFn[] {
-  const re = /^def\s+([A-Za-z_]\w*)\s*\(\s*[A-Za-z_]\w*(?:\s*,[^)]*)?\)\s*:/gm;
-  const names: string[] = [];
-  for (const m of source.matchAll(re)) names.push(m[1]);
-  return [...new Set(names)].map((name) => ({ name }));
-}
-
-function shq(s: string): string {
-  return "'" + s.replace(/'/g, `'\\''`) + "'";
-}
-
-function pythonDriver(moduleFile: string, fnName: string): string {
-  const mod = JSON.stringify("./" + moduleFile);
-  const fn = JSON.stringify(fnName);
-  return `
-import base64
-import os
-import importlib.util
-
-payload_b64 = os.environ.get("RAEUBER_PAYLOAD_B64", "")
-try:
-  payload = base64.b64decode(payload_b64).decode("utf-8", "replace")
-except Exception as e:
-  print("BASE64_FAIL:" + str(e))
-  raise SystemExit(0)
-
-spec = importlib.util.spec_from_file_location("raeuber_target", ${mod})
-if spec is None or spec.loader is None:
-  print("IMPORT_FAIL")
-  raise SystemExit(0)
-
-mod = importlib.util.module_from_spec(spec)
-try:
-  spec.loader.exec_module(mod)
-except Exception as e:
-  print("IMPORT_FAIL:" + str(e))
-  raise SystemExit(0)
-
-fn = getattr(mod, ${fn}, None)
-if not callable(fn):
-  print("NOT_A_FUNCTION")
-  raise SystemExit(0)
-
-try:
-  r = fn(payload)
-  if r is not None:
-    print(r)
-except Exception as e:
-  print(str(e))
-`.trim();
-}
-
 export class PathTraversalPythonAttacker implements Attacker {
   readonly attackClass = "path-traversal" as const;
   readonly canaryFixtureDir = resolve(HERE, "..", "..", "fixtures", "path-traversal-python");
-  // Python traversal payloading requires a Python runtime image in crabbox.
-  readonly sandboxImage = "python:3-bookworm-slim";
+  readonly sandboxImage = PYTHON_SANDBOX_IMAGE;
 
   handles(file: string): boolean {
     return PYTHON_SOURCE_RE.test(file);
@@ -100,6 +43,7 @@ export class PathTraversalPythonAttacker implements Attacker {
 
   hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
     const exploits: Exploit[] = [];
+    const py = ensurePythonEnv(sandbox, targetDir);
     const secret = freshMarker() + "_PT_SECRET";
     sandbox.exec("mkdir -p public", 15_000);
     sandbox.writeFile("public/raeuber-decoy.txt", secret);
@@ -128,7 +72,7 @@ export class PathTraversalPythonAttacker implements Attacker {
         sandbox.writeFile(driverRel, pythonDriver(file, fn.name));
         for (const payload of TRAVERSAL_PAYLOADS) {
           const out = sandbox.exec(
-            `RAEUBER_PAYLOAD_B64=${Buffer.from(payload).toString("base64")} python3 ${shq(driverRel)} 2>&1`,
+            `RAEUBER_PAYLOAD_B64=${Buffer.from(payload).toString("base64")} ${py} ${shq(driverRel)} 2>&1`,
             15_000,
           );
           const output = out.stdout + out.stderr;

@@ -16,6 +16,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE = join(ROOT, "fixtures", "command-injection-node");
 const PY_CMD_FIXTURE = join(ROOT, "fixtures", "command-injection-python");
 const GO_CMD_FIXTURE = join(ROOT, "fixtures", "command-injection-go");
+const PY_DESER_FIXTURE = join(ROOT, "fixtures", "unsafe-deserialization-python");
 const LOCAL = { sandbox: { prefer: "local" } };
 
 // The C# drive-and-prove lanes compile with `dotnet`; skip (don't fail) their tests where the SDK is
@@ -399,6 +400,52 @@ describe("raeuberkrebs unsafe-deserialization gate", () => {
     });
     try {
       const r = runRedteam(dir, ["safe.js"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "unsafe-deserialization").length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+      assert.ok(r.lanes.some((l) => l.attackClass === "unsafe-deserialization" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("raeuberkrebs unsafe-deserialization gate (Python lane)", () => {
+  it("fires on the planted Python fixture (pickle.loads) with a proven, echo-proof PoC", () => {
+    const r = runRedteam(PY_DESER_FIXTURE, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "unsafe-deserialization");
+    assert.ok(e, "expected an unsafe-deserialization exploit");
+    assert.equal(e.proof, "marker-executed");
+    assert.match(e.evidence, /RAEUBER_[0-9a-f]+/);
+    assert.match(e.sink, /pickle\.loads/);
+  });
+
+  it("fires on NOVEL vulnerable Python code — a bespoke pickle.loads sink", () => {
+    const dir = scratch({
+      "app.py": "import pickle\n\ndef load(blob):\n  return pickle.loads(blob)\n",
+    });
+    try {
+      const r = runRedteam(dir, ["app.py"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find((x) => x.attackClass === "unsafe-deserialization");
+      assert.ok(e, "expected an unsafe-deserialization exploit");
+      assert.equal(e.file, "app.py");
+      assert.equal(e.proof, "marker-executed");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire when the sink is present in source but never deserializes untrusted input", () => {
+    const dir = scratch({
+      "safe.py":
+        "import pickle\n\n" +
+        "def echo(data):\n" +
+        "  if False:\n    pickle.loads(data)\n" +
+        "  return data\n",
+    });
+    try {
+      const r = runRedteam(dir, ["safe.py"], LOCAL);
       assert.equal(r.exploits.filter((x) => x.attackClass === "unsafe-deserialization").length, 0);
       assert.notEqual(r.verdict, "vulnerable");
       assert.ok(r.lanes.some((l) => l.attackClass === "unsafe-deserialization" && l.live));

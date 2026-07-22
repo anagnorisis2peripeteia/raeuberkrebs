@@ -8,14 +8,12 @@
 // driver prints IMPORT_FAIL, and the lane silently sees zero fired → a FALSE CLEAN. That is the
 // Python twin of the Node build-toolchain false-clean that `bundleForImport` fixed.
 //
-// The fix here is `_load_target`: compute the module's real dotted name by walking up `__init__.py`
-// markers, put the package ROOT on `sys.path`, and `importlib.import_module(dotted)` so the module
-// loads WITH its package context and intra-package imports resolve. Standalone files (no `__init__.py`
-// — the canary fixtures) fall back to the old spec-from-file path, so those keep firing unchanged.
-//
-// Third-party deps (fastapi, pydantic, …) still have to be importable for the module to load; that is
-// `ensurePythonEnv`'s job (an opt-in venv install), and this driver simply runs under whichever python
-// that returns.
+// The fix is `_load_target` (in PYTHON_LOAD_TARGET_SRC below): compute the module's real dotted name
+// by walking up `__init__.py` markers, put the package ROOT on `sys.path`, and
+// `importlib.import_module(dotted)` so the module loads WITH its package context and intra-package
+// imports resolve. It falls back to the old spec-from-file load on failure, so the mechanism is a
+// STRICT SUPERSET of the old one. Every Python driver embeds this same source, so they all inherit
+// the fix (and third-party deps are handled orthogonally by `ensurePythonEnv`'s opt-in venv).
 
 /** The runtime image Python lanes need when driving inside crabbox. */
 export const PYTHON_SANDBOX_IMAGE = "python:3-bookworm-slim";
@@ -26,8 +24,7 @@ interface PythonFn {
 
 /**
  * Top-level `def name(arg, …)` entrypoints we can drive in isolation: a module-level function whose
- * first parameter is positional (so the payload can flow in as the untrusted first argument). Dunder
- * and clearly-private (`_`-prefixed) names are still returned — a lane may legitimately reach them.
+ * first parameter is positional (so the payload can flow in as the untrusted first argument).
  */
 export function topLevelFunctions(source: string): PythonFn[] {
   const re = /^def\s+([A-Za-z_]\w*)\s*\(\s*[A-Za-z_]\w*(?:\s*,[^)]*)?\)\s*:/gm;
@@ -42,34 +39,22 @@ export function shq(s: string): string {
 }
 
 /**
- * The driver script: decode the base64 payload from RAEUBER_PAYLOAD_B64, import the target module
- * WITH package context, resolve `fnName`, and call `fn(payload)`. Prints IMPORT_FAIL / NOT_A_FUNCTION
- * on the honest failure paths (so a broken import is visible in the driver output, never silently a
- * pass). CalledProcessError output is surfaced too, since a shell sink that raises still carries the
- * fired marker in its captured `stdout`.
+ * The shared import-as-package loader: `import`s plus `_load_target(rel)`. Embedded verbatim by every
+ * Python driver so they all get the package-context import fix and its strict-superset fallback.
  */
-export function pythonDriver(moduleFile: string, fnName: string): string {
-  const target = JSON.stringify(moduleFile);
-  const fn = JSON.stringify(fnName);
-  return `
-import base64
+export const PYTHON_LOAD_TARGET_SRC = `
 import os
 import sys
 import importlib
 import importlib.util
 
-payload_b64 = os.environ.get("RAEUBER_PAYLOAD_B64", "")
-try:
-  payload = base64.b64decode(payload_b64).decode("utf-8", "replace")
-except Exception as e:
-  print("BASE64_FAIL:" + str(e))
-  raise SystemExit(0)
-
 
 def _load_target(rel):
   # Resolve the module's dotted name by walking up the tree while __init__.py marks a package, then
   # import it with that name so its intra-package imports resolve. Falls back to a standalone
-  # spec-from-file load when the file is not inside a package (self-contained scripts / fixtures).
+  # spec-from-file load when the file is not inside a package (self-contained scripts / fixtures),
+  # OR when the package import fails (e.g. a parent __init__.py pulls a heavy dep) but the leaf module
+  # is self-contained — that fallback keeps the new mechanism a STRICT SUPERSET of the old one.
   path = os.path.abspath(rel)
   base = os.path.splitext(os.path.basename(path))[0]
   parts = [] if base == "__init__" else [base]
@@ -78,19 +63,12 @@ def _load_target(rel):
     parts.insert(0, os.path.basename(d))
     d = os.path.dirname(d)
   if parts:
-    root = d
-    if root not in sys.path:
-      sys.path.insert(0, root)
+    if d not in sys.path:
+      sys.path.insert(0, d)
     try:
       return importlib.import_module(".".join(parts))
     except Exception:
-      # Fall through to the standalone load below. This keeps the new mechanism a STRICT SUPERSET
-      # of the old one: package context is preferred (it resolves intra-package imports), but when a
-      # parent __init__.py fails to import (e.g. a heavy dep it pulls in) yet the leaf module is
-      # self-contained, the file-location load can still drive it — exactly what the old driver did.
       pass
-  # Standalone module (no package) OR package import failed: make sibling imports resolvable, then
-  # load the file directly by its location.
   pkg_dir = os.path.dirname(path)
   if pkg_dir not in sys.path:
     sys.path.insert(0, pkg_dir)
@@ -100,7 +78,27 @@ def _load_target(rel):
   m = importlib.util.module_from_spec(spec)
   spec.loader.exec_module(m)
   return m
+`.trim();
 
+/**
+ * Driver for the injection lanes (command-injection, path-traversal): decode the base64 payload from
+ * RAEUBER_PAYLOAD_B64, import the target WITH package context, resolve `fnName`, call `fn(payload)`.
+ * Prints IMPORT_FAIL / NOT_A_FUNCTION on the honest failure paths. CalledProcessError output is
+ * surfaced too, since a shell sink that raises still carries the fired marker in its captured stdout.
+ */
+export function pythonDriver(moduleFile: string, fnName: string): string {
+  const target = JSON.stringify(moduleFile);
+  const fn = JSON.stringify(fnName);
+  return `
+import base64
+${PYTHON_LOAD_TARGET_SRC}
+
+payload_b64 = os.environ.get("RAEUBER_PAYLOAD_B64", "")
+try:
+  payload = base64.b64decode(payload_b64).decode("utf-8", "replace")
+except Exception as e:
+  print("BASE64_FAIL:" + str(e))
+  raise SystemExit(0)
 
 try:
   mod = _load_target(${target})
@@ -122,5 +120,88 @@ except Exception as e:
   if isinstance(out, (bytes, bytearray)):
     out = out.decode("utf-8", "replace")
   print(out or str(e))
+`.trim();
+}
+
+/** Deserialization families we can drive-and-prove: pickle-protocol loaders and unsafe YAML loaders. */
+export type DeserMode = "pickle" | "yaml";
+
+/**
+ * Driver for the unsafe-deserialization lane. The proof is a benign, ECHO-PROOF, SHELL-FREE side
+ * effect: a gadget tells the deserializer to call `open(SENTINEL, "w")`, which creates a sentinel
+ * FILE. Only real deserialization (executing the gadget) creates it — a function that merely echoes
+ * the payload back cannot — so there is no false positive from payload reflection. The driver checks
+ * for the file after each call.
+ *
+ * - pickle family: `pickle.dumps(gadget)` where `gadget.__reduce__` → `(open, (SENTINEL, "w"))`.
+ * - unsafe YAML: `!!python/object/apply:builtins.open ["SENTINEL", "w"]` (fires only under an unsafe
+ *   loader — a modern `yaml.load`/FullLoader blocks `apply`, so a safe caller correctly does NOT fire).
+ */
+export function unsafeDeserPythonDriver(
+  moduleFile: string,
+  fnName: string,
+  marker: string,
+  modes: DeserMode[],
+): string {
+  const target = JSON.stringify(moduleFile);
+  const fn = JSON.stringify(fnName);
+  const mk = JSON.stringify(marker);
+  const modeList = JSON.stringify(modes);
+  return `
+import pickle
+${PYTHON_LOAD_TARGET_SRC}
+
+MARKER = ${mk}
+SENTINEL = os.path.abspath(".rk-deser-fired-" + MARKER)
+MODES = ${modeList}
+
+try:
+  mod = _load_target(${target})
+except Exception as e:
+  print("IMPORT_FAIL:" + repr(e))
+  raise SystemExit(0)
+
+fn = getattr(mod, ${fn}, None)
+if not callable(fn):
+  print("NOT_A_FUNCTION")
+  raise SystemExit(0)
+
+
+class _PickleGadget:
+  # On unpickling, pickle calls open(SENTINEL, "w") — a benign file side effect that only real
+  # deserialization can trigger. No shell, no network, nothing destructive.
+  def __reduce__(self):
+    return (open, (SENTINEL, "w"))
+
+
+def _clear():
+  try:
+    if os.path.exists(SENTINEL):
+      os.remove(SENTINEL)
+  except Exception:
+    pass
+
+
+def _call(payload):
+  try:
+    fn(payload)
+  except Exception:
+    pass  # a raised exception does not invalidate the PoC — the file side effect is the proof
+
+
+for mode in MODES:
+  _clear()
+  if mode == "pickle":
+    _call(pickle.dumps(_PickleGadget()))
+  elif mode == "yaml":
+    _call('!!python/object/apply:builtins.open ["' + SENTINEL + '", "w"]')
+  if os.path.exists(SENTINEL):
+    # Marker printed ONLY after the file side effect is confirmed, so it stays echo-proof while tying
+    # the evidence to this run's fresh nonce.
+    print("UNSAFE_DESER_FIRED mode=" + mode + " marker=" + MARKER)
+    _clear()
+    raise SystemExit(0)
+
+print("UNSAFE_DESER_NOFIRE")
 `.trim();
 }

@@ -33,6 +33,7 @@ import { PathTraversalDotnetAttacker } from "./attackers/path-traversal-dotnet.j
 import { SecondaryInterpreterAttacker } from "./attackers/secondary-interpreter.js";
 import { UnsafeDeserializationDotnetAttacker } from "./attackers/unsafe-deserialization-dotnet.js";
 import { UnsafeDeserializationAttacker } from "./attackers/unsafe-deserialization.js";
+import { UnsafeDeserializationPythonAttacker } from "./attackers/unsafe-deserialization-python.js";
 import { ControlPlaneAttacker } from "./attackers/control-plane.js";
 import { ExecAuthorizationAttacker } from "./attackers/exec-authorization.js";
 import {
@@ -83,6 +84,7 @@ export const ATTACKERS: Attacker[] = [
   new ResourceExhaustionAttacker(),
   new PrototypePollutionAttacker(),
   new UnsafeDeserializationAttacker(),
+  new UnsafeDeserializationPythonAttacker(),
   new ZipSlipAttacker(),
   new StoredTaintAttacker(),
   // Node static lanes: high-risk crypto/token weaknesses surfaced in source (issue #19). Static-only;

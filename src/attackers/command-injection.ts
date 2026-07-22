@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
-import type { Sandbox } from "../sandbox.js";
+import { type Sandbox, bundleForImport } from "../sandbox.js";
 import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames, nodeImportDriver, scanSinkLeads } from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -70,13 +70,16 @@ export class CommandInjectionAttacker implements Attacker {
       const sinkLine = firstSinkLine(source);
       const sink = (source.match(SINK_RE)?.[0] ?? "child_process").split("(")[0].trim();
 
+      // Bundle the module so it's importable even in build-toolchain repos (workspace
+      // deps, ESM/CJS, path aliases); fall back to the raw file when bundling isn't needed.
+      const importRel = bundleForImport(sandbox, file) ?? file;
       let fired = false;
       for (const name of names) {
         if (fired) break;
         const marker = freshMarker();
         for (const payload of payloads(marker)) {
           const driverRel = `.raeuber-driver-${marker}.mjs`;
-          sandbox.writeFile(driverRel, nodeImportDriver(file, name, payload));
+          sandbox.writeFile(driverRel, nodeImportDriver(importRel, name, payload));
           const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 15_000);
           const out = run.stdout + run.stderr;
           // Fired = the marker appears in output SOMEWHERE OTHER than inside the literal

@@ -1,8 +1,69 @@
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// raeuberkrebs's own esbuild binary — used to bundle a target module + its deps into a
+// single directly-importable ESM file, so drive-and-prove works on build-toolchain repos
+// whose raw source is not importable (workspace deps, ESM/CJS interop, `~/` path aliases).
+// The repo's workspace deps must be BUILT first for esbuild to resolve them.
+const ESBUILD_BIN = join(dirname(fileURLToPath(import.meta.url)), "..", "node_modules", ".bin", "esbuild");
+
+/**
+ * Bundle a sandbox-relative target module into one importable `.mjs`, resolving the
+ * repo's built deps + nearest tsconfig path-aliases. Returns the bundled rel path, or
+ * null if bundling fails (caller falls back to importing the raw file — an honest miss
+ * on repos that don't need it, and a real drive on those that do). Local sandbox only
+ * (esbuild runs on the host over the sandbox copy; bundling executes no target code).
+ */
+const bundleCache = new WeakMap<Sandbox, Map<string, string | null>>();
+
+export function bundleForImport(sandbox: Sandbox, relPath: string): string | null {
+  let cache = bundleCache.get(sandbox);
+  if (!cache) {
+    cache = new Map();
+    bundleCache.set(sandbox, cache);
+  }
+  if (cache.has(relPath)) return cache.get(relPath) ?? null;
+  const bundled = runEsbuildBundle(sandbox, relPath);
+  cache.set(relPath, bundled);
+  return bundled;
+}
+
+function runEsbuildBundle(sandbox: Sandbox, relPath: string): string | null {
+  // Bundle only as a FALLBACK: if the raw module imports directly (self-contained
+  // ESM — the common case, incl. the canary fixtures), return null so the caller
+  // drives the raw file unchanged. Bundling can alter runtime cwd/path semantics,
+  // so it's reserved for build-toolchain repos whose raw source won't import.
+  const probe = sandbox.exec(
+    `node --no-warnings --experimental-transform-types --input-type=module ` +
+      `-e 'import("./${relPath}").then(()=>process.stdout.write("RK_IMPORT_OK")).catch(()=>{})' 2>/dev/null`,
+    30_000,
+  );
+  if (probe.stdout.includes("RK_IMPORT_OK")) return null;
+
+  const tsc = sandbox.exec(
+    `d=$(dirname "${relPath}"); while [ "$d" != "." ] && [ "$d" != "/" ]; do ` +
+      `[ -f "$d/tsconfig.json" ] && { echo "$d/tsconfig.json"; break; }; d=$(dirname "$d"); done; ` +
+      `[ -f tsconfig.json ] && echo tsconfig.json`,
+    10_000,
+  );
+  const tsconfigRel = tsc.stdout.trim().split("\n")[0] || "";
+  const tscFlag = tsconfigRel ? `--tsconfig="${tsconfigRel}"` : "";
+  const outRel = `.rk-mod-${basename(relPath).replace(/[^a-z0-9]/gi, "_")}-${randomBytes(4).toString("hex")}.mjs`;
+  // The banner defines a real `require` (via createRequire) in the ESM output so a
+  // bundled CommonJS dependency's `require("util")` etc. works instead of hitting
+  // esbuild's "Dynamic require of X is not supported" shim.
+  const banner = `--banner:js='import{createRequire as __cr}from"module";var require=__cr(import.meta.url);'`;
+  const r = sandbox.exec(
+    `"${ESBUILD_BIN}" "${relPath}" --bundle --platform=node --format=esm --outfile="${outRel}" ${tscFlag} ` +
+      `${banner} --log-level=silent >/dev/null 2>&1 && echo RK_BUNDLE_OK || echo RK_BUNDLE_FAIL`,
+    180_000,
+  );
+  return r.stdout.includes("RK_BUNDLE_OK") ? outRel : null;
+}
 
 // The PoC-execution sandbox. Räuberkrebs's defining primitive: an attacker lane proves a vuln by
 // EXECUTING a payload, so that payload must run in isolation and never harm the host.
@@ -85,12 +146,28 @@ class LocalSandbox implements Sandbox {
 
   constructor(targetDir: string) {
     this.work = mkdtempSync(join(tmpdir(), "raeuber-"));
-    cpSync(targetDir, this.work, { recursive: true });
+    this.copyInto(targetDir);
+  }
+
+  // Copy `sourceDir` into the work dir, but EXCLUDE node_modules (can be gigabytes)
+  // and instead symlink it in, so a driven module still resolves its dependencies
+  // without the per-sandbox cost of copying the whole install. Node's module
+  // resolution walks up to the symlinked top-level node_modules for hoisted deps.
+  private copyInto(sourceDir: string): void {
+    cpSync(sourceDir, this.work, {
+      recursive: true,
+      filter: (src) => basename(src) !== "node_modules",
+    });
+    const nm = join(sourceDir, "node_modules");
+    const dest = join(this.work, "node_modules");
+    if (existsSync(nm) && !existsSync(dest)) {
+      symlinkSync(nm, dest, "dir");
+    }
   }
 
   seedDir(sourceDir: string): void {
     rmSync(this.work, { recursive: true, force: true });
-    cpSync(sourceDir, this.work, { recursive: true });
+    this.copyInto(sourceDir);
   }
 
   writeFile(relPath: string, contents: string): void {

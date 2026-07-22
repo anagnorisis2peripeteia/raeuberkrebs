@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
-import type { Sandbox } from "../sandbox.js";
+import { type Sandbox, bundleForImport } from "../sandbox.js";
 import {
   type Attacker,
   type StaticLead,
@@ -676,7 +676,7 @@ export class BrokenAccessControlAttacker implements Attacker {
       for (const cand of candidates) {
         const marker = freshMarker();
         const driverRel = `.raeuber-bac-${marker}.mjs`;
-        sandbox.writeFile(driverRel, bacDiffDriver(file, cand.weak.name, cand.weak.scopes, cand.strong.name, marker));
+        sandbox.writeFile(driverRel, bacDiffDriver(bundleForImport(sandbox, file) ?? file, cand.weak.name, cand.weak.scopes, cand.strong.name, marker));
         const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 15_000);
         const out = run.stdout + run.stderr;
         if (!out.includes("BAC_FIRED")) continue;
@@ -717,7 +717,7 @@ export class BrokenAccessControlAttacker implements Attacker {
           if (action.name === transition.name) continue;
           const marker = freshMarker();
           const driverRel = `.raeuber-bac-state-${marker}.mjs`;
-          sandbox.writeFile(driverRel, bacStatefulDriver(file, action.name, transition.name, marker));
+          sandbox.writeFile(driverRel, bacStatefulDriver(bundleForImport(sandbox, file) ?? file, action.name, transition.name, marker));
           const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 15_000);
           const out = run.stdout + run.stderr;
           if (!out.includes("BAC_STATEFUL_FIRED")) continue;

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
-import type { Sandbox } from "../sandbox.js";
+import { type Sandbox, bundleForImport } from "../sandbox.js";
 import {
   type Attacker,
   type StaticLead,
@@ -168,7 +168,7 @@ export class UnsafeExecAttacker implements Attacker {
         let fired = false;
         for (const candidate of markerPayload(freshMarker())) {
           const driverRel = `.raeuber-driver-${freshMarker()}.mjs`;
-          sandbox.writeFile(driverRel, nodeImportDriver(file, name, candidate.payload));
+          sandbox.writeFile(driverRel, nodeImportDriver(bundleForImport(sandbox, file) ?? file, name, candidate.payload));
           const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 15_000);
           const out = run.stdout + run.stderr;
           if (out.includes(candidate.marker)) {

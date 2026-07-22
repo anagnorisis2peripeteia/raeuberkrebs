@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
-import type { Sandbox } from "../sandbox.js";
+import { type Sandbox, bundleForImport } from "../sandbox.js";
 import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames, nodeImportDriver, scanSinkLeads } from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -103,7 +103,7 @@ function firstSuccessfulSafeProbe(
   for (const input of safeInputs) {
     for (const name of names) {
       const driverRel = `.raeuber-driver-${freshMarker()}.mjs`;
-      sandbox.writeFile(driverRel, nodeImportDriver(file, name, input));
+      sandbox.writeFile(driverRel, nodeImportDriver(bundleForImport(sandbox, file) ?? file, name, input));
       const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 15_000);
       const out = run.stdout + run.stderr;
       if (out.includes(baselineMarker)) {
@@ -124,7 +124,7 @@ function runProbe(
   payload: string,
 ): string {
   const driverRel = `.raeuber-driver-${freshMarker()}.mjs`;
-  sandbox.writeFile(driverRel, nodeImportDriver(file, fnName, payload));
+  sandbox.writeFile(driverRel, nodeImportDriver(bundleForImport(sandbox, file) ?? file, fnName, payload));
   const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 15_000);
   return run.stdout + run.stderr;
 }

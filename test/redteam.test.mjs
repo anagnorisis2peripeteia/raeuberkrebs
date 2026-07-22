@@ -537,6 +537,60 @@ describe("raeuberkrebs differential-oracle (policy-belief-divergence) — Python
   });
 });
 
+describe("raeuberkrebs normalization-differential (guard fail-open) — Python lane", () => {
+  const NORMDIFF_FIXTURE = join(ROOT, "fixtures", "normalization-differential-python");
+  it("fires on a naive danger detector that a shell-obfuscated command evades", () => {
+    const r = runRedteam(NORMDIFF_FIXTURE, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "policy-belief-divergence" && /detector:/.test(x.sink));
+    assert.ok(e, "expected a normalization-differential exploit");
+    assert.equal(e.proof, "belief-diverged");
+    assert.match(e.sink, /is_dangerous_command/);
+    // the obfuscated payload carries no literal command name (ANSI-C quoting or a brace list)
+    assert.ok(/\$'|\{/.test(e.payload), `payload should be obfuscated: ${e.payload}`);
+  });
+
+  it("fires on a NOVEL naive detector (bespoke is_blocked)", () => {
+    const dir = scratch({
+      "guard.py":
+        "def is_blocked_command(command):\n" +
+        "  return 'rm -rf' in command or 'mkfs' in command\n",
+    });
+    try {
+      const r = runRedteam(dir, ["guard.py"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find((x) => x.attackClass === "policy-belief-divergence" && /detector:/.test(x.sink));
+      assert.ok(e, "expected a normalization-differential exploit");
+      assert.equal(e.file, "guard.py");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire on a SOUND detector that decodes ANSI-C quoting + expands braces", () => {
+    const dir = scratch({
+      "sound.py":
+        "import re\n\n" +
+        "def _norm(c):\n" +
+        "  c = re.sub(r\"\\$'((?:[^'\\\\]|\\\\.)*)'\", lambda m: bytes(m.group(1), 'utf-8').decode('unicode_escape'), c)\n" +
+        "  c = re.sub(r'(?<!\\$)\\{([^{}]*,[^{}]*)\\}', lambda m: ' ' + m.group(1).replace(',', ' ') + ' ', c)\n" +
+        "  return c\n\n" +
+        "def is_dangerous_command(command):\n" +
+        "  return re.search(r'\\brm\\s+-rf|\\bmkfs\\b|\\bshutdown\\b', _norm(command)) is not None\n",
+    });
+    try {
+      const r = runRedteam(dir, ["sound.py"], LOCAL);
+      assert.equal(
+        r.exploits.filter((x) => x.attackClass === "policy-belief-divergence" && /detector:/.test(x.sink)).length,
+        0,
+      );
+      assert.notEqual(r.verdict, "vulnerable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
 
 describe("raeuberkrebs command-injection gate (Swift lane)", () => {

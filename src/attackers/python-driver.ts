@@ -271,3 +271,88 @@ for fname in FNS:
       print("RK_DIVERGENCE fn=" + fname + " " + json.dumps(cmd))
 `.trim();
 }
+
+/** A (dangerous seed, shell-obfuscated variant) pair whose forms bash expands identically. */
+export interface NormDiffItem {
+  plain: string;
+  obf: string;
+  technique: string;
+}
+
+/**
+ * Driver for the normalization-differential oracle (fail-open guard detection). For each discovered
+ * danger-DETECTOR function and each (plain, obf) corpus pair: fire when the detector FLAGS the plain
+ * dangerous command but CLEARS its shell-obfuscated variant, AND the shell (`bash`) expands both to
+ * the SAME command — a proven guard bypass (the detector's normalization diverges from the shell).
+ *
+ * Safety: the detector is only ever called as a pure string classifier (never executed), and the sole
+ * shell call is a benign `set -f; echo <cmd>` that prints what the command EXPANDS to (it never runs
+ * the dangerous command). No destructive command is ever executed.
+ */
+export function normalizationDifferentialDriver(
+  moduleFile: string,
+  detectorNames: string[],
+  marker: string,
+  corpus: NormDiffItem[],
+): string {
+  const target = JSON.stringify(moduleFile);
+  const detectors = JSON.stringify(detectorNames);
+  const mk = JSON.stringify(marker);
+  const corpusJson = JSON.stringify(corpus);
+  return `
+import json
+import subprocess
+${PYTHON_LOAD_TARGET_SRC}
+
+MARKER = ${mk}
+DETECTORS = ${detectors}
+CORPUS = ${corpusJson}
+
+try:
+  mod = _load_target(${target})
+except Exception as e:
+  print("IMPORT_FAIL:" + repr(e))
+  raise SystemExit(0)
+
+
+def _flagged(r):
+  # A detector's verdict: bool, or a tuple/list whose first element is the boolean (e.g. the common
+  # \`(is_dangerous, description)\` / \`(matched, key, desc)\` shapes).
+  if isinstance(r, (tuple, list)):
+    return bool(r[0]) if r else False
+  return bool(r)
+
+
+def _expand(cmd):
+  # Benign: ask the ACTUAL shell what the command expands to. \`set -f\` disables globbing; \`echo\`
+  # prints the expanded words and never runs the command. Returns the expansion string, or None.
+  try:
+    r = subprocess.run(["bash", "-c", "set -f; echo " + cmd], capture_output=True, text=True, timeout=4)
+    out = r.stdout.strip()
+    return out or None
+  except Exception:
+    return None
+
+
+for dname in DETECTORS:
+  d = getattr(mod, dname, None)
+  if not callable(d):
+    continue
+  for item in CORPUS:
+    plain = item["plain"]
+    obf = item["obf"]
+    technique = item["technique"]
+    try:
+      flagged_plain = _flagged(d(plain))
+      flagged_obf = _flagged(d(obf))
+    except Exception:
+      continue
+    if not (flagged_plain and not flagged_obf):
+      continue  # no verdict flip -> the detector is not evaded by this obfuscation
+    ep = _expand(plain)
+    eo = _expand(obf)
+    if ep is not None and ep == eo:
+      # detector flags plain, clears obf, and bash expands both to the SAME command -> proven bypass
+      print("RK_NORMDIFF fn=" + dname + " technique=" + technique + " " + json.dumps({"plain": plain, "obf": obf}))
+`.trim();
+}

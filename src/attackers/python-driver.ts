@@ -27,7 +27,11 @@ interface PythonFn {
  * first parameter is positional (so the payload can flow in as the untrusted first argument).
  */
 export function topLevelFunctions(source: string): PythonFn[] {
-  const re = /^def\s+([A-Za-z_]\w*)\s*\(\s*[A-Za-z_]\w*(?:\s*,[^)]*)?\)\s*:/gm;
+  // Match `def name(` with at least one parameter, tolerating type annotations, defaults, `*args`, and
+  // multiline signatures (`\s*` spans newlines). The old pattern required an UN-annotated first param
+  // followed immediately by `,`/`)`, so it silently skipped every typed function — i.e. essentially all
+  // modern Python (`def f(cmd: str) -> bool:`) — making the lanes false-clean on real typed code.
+  const re = /^def\s+([A-Za-z_]\w*)\s*\(\s*[A-Za-z_*]/gm;
   const names: string[] = [];
   for (const m of source.matchAll(re)) names.push(m[1]);
   return [...new Set(names)].map((name) => ({ name }));
@@ -258,11 +262,11 @@ for fname in FNS:
     continue
   for cmd in CORPUS:
     try:
-      believed = bool(fn(cmd))
+      believed = fn(cmd) is True
     except Exception:
       continue  # the control errored on this input — not a clean approval
     if not believed:
-      continue  # control says unsafe -> it would block/prompt; not a bypass
+      continue  # control says unsafe / returned a non-True report -> not a clean approval
     if _ground_truth_fired(cmd):
       print("RK_DIVERGENCE fn=" + fname + " " + json.dumps(cmd))
 `.trim();

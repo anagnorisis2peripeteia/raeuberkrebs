@@ -101,6 +101,8 @@ export class PathTraversalPythonAttacker implements Attacker {
   hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
     const exploits: Exploit[] = [];
     const secret = freshMarker() + "_PT_SECRET";
+    sandbox.exec("mkdir -p public", 15_000);
+    sandbox.writeFile("public/raeuber-decoy.txt", secret);
     sandbox.writeFile("raeuber-decoy.txt", secret);
 
     for (const file of files) {

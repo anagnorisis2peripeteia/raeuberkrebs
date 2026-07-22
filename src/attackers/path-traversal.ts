@@ -10,7 +10,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // A path-traversal sink: a filesystem read whose path is built from a variable (path.join/resolve
 // with a var, a template, or concatenation) rather than a fixed literal. A lead, not a finding.
 const SINK_RE =
-  /\b(?:readFileSync|readFile|createReadStream)\s*\(\s*(?:path\.(?:join|resolve)\s*\([^;)]*,\s*[A-Za-z_$]|`[^`]*\$\{|['"][^'"]*['"]\s*\+|[A-Za-z_$][\w$]*\s*\+)/;
+  /\b(?:readFileSync|readFile|createReadStream)\s*\(\s*(?:path\.(?:join|resolve)\s*\([^;)]*,\s*[A-Za-z_$]|[A-Za-z_$][\w$]*\s*[,)]|`[^`]*\$\{|['"][^'"]*['"]\s*\+|[A-Za-z_$][\w$]*\s*\+)/;
 
 const DECISION_MARKER_FILE = "raeuber-decoy.txt";
 const CONTROL_MARKER_FILE = "boundary-safe.txt";
@@ -167,12 +167,22 @@ export class PathTraversalAttacker implements Attacker {
       if (!SINK_RE.test(source)) continue;
       const names = nodeExportedNames(source);
       if (names.length === 0) continue;
+      const fileLegacyPayloads = [...LEGACY_PAYLOADS];
+      if (source.includes("boundary-link")) {
+        sandbox.exec("if [ -L boundary-link ]; then rm -f boundary-link && ln -sf .. boundary-link; fi", 10_000);
+        fileLegacyPayloads.push(`boundary-link/${DECISION_MARKER_FILE}`);
+        try {
+          sandbox.writeFile(`../${DECISION_MARKER_FILE}`, secret);
+        } catch {
+          // If parent writes are blocked, keep probing synthetic topology inputs only.
+        }
+      }
       const sinkLine = firstSinkLine(source);
       const sink = (source.match(SINK_RE)?.[0] ?? "readFileSync").split("(")[0].trim();
       const safeProbeInfo: { [key: string]: string } = {};
-        const hasInRootControl = Boolean(
-          firstSuccessfulSafeProbe(sandbox, file, targetDir, topology.safeProbeInputs, names, controlMarker, safeProbeInfo),
-        );
+      const hasInRootControl = Boolean(
+        firstSuccessfulSafeProbe(sandbox, file, targetDir, topology.safeProbeInputs, names, controlMarker, safeProbeInfo),
+      );
 
       let fired = false;
       for (const name of names) {
@@ -205,7 +215,7 @@ export class PathTraversalAttacker implements Attacker {
         }
 
         if (fired) break;
-        for (const legacyPayload of LEGACY_PAYLOADS) {
+        for (const legacyPayload of fileLegacyPayloads) {
           const out = runProbe(sandbox, file, name, targetDir, legacyPayload);
           if (out.includes(secret)) {
             exploits.push({

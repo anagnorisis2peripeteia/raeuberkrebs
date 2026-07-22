@@ -16,7 +16,7 @@
 // for how to instantiate one on a new target.
 import type { Attacker, StaticLead } from "./attackers/attacker.js";
 import { nodeRunCommand, freshMarker } from "./attackers/attacker.js";
-import type { Sandbox } from "./sandbox.js";
+import { type Sandbox, bundleForImport } from "./sandbox.js";
 import type { AttackClass, Exploit } from "./types.js";
 
 /** How ground truth for an input is obtained. */
@@ -103,7 +103,7 @@ export function differentialOracleAttacker(spec: DifferentialOracleSpec): Attack
         if (!spec.handles(file)) continue;
         const marker = freshMarker();
         const driverRel = `.raeuber-oracle-${marker}.mjs`;
-        sandbox.writeFile(driverRel, buildOracleDriver(spec, file, marker));
+        sandbox.writeFile(driverRel, buildOracleDriver(spec, bundleForImport(sandbox, file) ?? file, marker));
         const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 20_000);
         const out = run.stdout + run.stderr;
         for (const rawLine of out.split("\n")) {

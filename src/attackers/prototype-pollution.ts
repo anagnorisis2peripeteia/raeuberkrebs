@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
-import type { Sandbox } from "../sandbox.js";
+import { type Sandbox, bundleForImport } from "../sandbox.js";
 import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames, scanSinkLeads } from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -87,7 +87,7 @@ export class PrototypePollutionAttacker implements Attacker {
         if (fired) break;
         const marker = freshMarker();
         const driverRel = `.raeuber-proto-${marker}.mjs`;
-        sandbox.writeFile(driverRel, pollutionDriver(file, name, marker));
+        sandbox.writeFile(driverRel, pollutionDriver(bundleForImport(sandbox, file) ?? file, name, marker));
         const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 15_000);
         const out = run.stdout + run.stderr;
         if (!out.includes("PROTO_FIRED")) continue;

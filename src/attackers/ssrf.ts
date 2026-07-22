@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
-import type { Sandbox } from "../sandbox.js";
+import { type Sandbox, bundleForImport } from "../sandbox.js";
 import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames } from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -307,7 +307,7 @@ export class SsrfAttacker implements Attacker {
         const marker = freshMarker();
         const driverRel = `.raeuber-driver-${marker}.mjs`;
         const boundaryRel = `.raeuber-boundary-${marker}.mjs`;
-        sandbox.writeFile(boundaryRel, ssrfBoundaryDriver(file, name, marker));
+        sandbox.writeFile(boundaryRel, ssrfBoundaryDriver(bundleForImport(sandbox, file) ?? file, name, marker));
         const boundaryRun = sandbox.exec(`${nodeRunCommand(targetDir)} ${boundaryRel} 2>&1`, 25_000);
         const boundaryOut = boundaryRun.stdout + boundaryRun.stderr;
         if (boundaryOut.includes("BOUNDARY_BYPASS") && boundaryOut.includes("payload=")) {
@@ -334,7 +334,7 @@ export class SsrfAttacker implements Attacker {
           continue;
         }
 
-        sandbox.writeFile(driverRel, ssrfCanaryDriver(file, name, marker));
+        sandbox.writeFile(driverRel, ssrfCanaryDriver(bundleForImport(sandbox, file) ?? file, name, marker));
         const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 20_000);
         const out = run.stdout + run.stderr;
         if (out.includes("OOB_FIRED") && out.includes(marker)) {

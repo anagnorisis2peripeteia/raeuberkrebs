@@ -65,6 +65,52 @@ function runEsbuildBundle(sandbox: Sandbox, relPath: string): string | null {
   return r.stdout.includes("RK_BUNDLE_OK") ? outRel : null;
 }
 
+// The Python analog of bundleForImport's dep-resolution half. `pythonDriver` (src/attackers/
+// python-driver.ts) already fixes intra-package imports by loading modules WITH package context;
+// this closes the other gap — third-party deps (fastapi, pydantic, …) that must be importable for a
+// real package's module to load at all. It returns the python executable the lanes should drive with.
+//
+// Default is a plain `python3`: importing the target already runs its module top-level (the lanes
+// always did), but auto-installing a target's deps additionally runs its build backend AND needs
+// network, so it is OPT-IN via RAEUBER_PY_INSTALL=1 — an operator who wants full-package coverage
+// asks for it (ideally with raeuberkrebs itself inside a container). Crabbox leases run with
+// `--network=none`, so they can never pip-install; only the local sandbox can. Honest degradation:
+// if the venv build fails or is not requested, drives whose deps are missing print IMPORT_FAIL rather
+// than silently counting as clean.
+const pyEnvCache = new WeakMap<Sandbox, string>();
+
+export function ensurePythonEnv(sandbox: Sandbox, _targetDir: string): string {
+  const cached = pyEnvCache.get(sandbox);
+  if (cached) return cached;
+  const py = buildPythonEnv(sandbox);
+  pyEnvCache.set(sandbox, py);
+  return py;
+}
+
+function buildPythonEnv(sandbox: Sandbox): string {
+  if (!process.env.RAEUBER_PY_INSTALL) return "python3"; // opt-in only (runs build backend + network)
+  if (sandbox.isolated) return "python3"; // crabbox has no network — cannot install remote deps
+  const hasManifest = sandbox.exec(
+    `{ [ -f pyproject.toml ] || [ -f setup.py ] || [ -f setup.cfg ] || [ -f requirements.txt ]; } && echo RK_HAS_MANIFEST || true`,
+    10_000,
+  );
+  if (!hasManifest.stdout.includes("RK_HAS_MANIFEST")) return "python3"; // nothing to install
+  // Throwaway venv; best-effort editable install of the target + its requirements so third-party
+  // imports resolve. Time-boxed — a real repo's deps can be slow — and failures fall back to python3.
+  const venvRel = ".rk-venv";
+  const build = sandbox.exec(
+    `python3 -m venv ${venvRel} >/dev/null 2>&1 && ` +
+      `{ [ -f pyproject.toml ] || [ -f setup.py ] || [ -f setup.cfg ]; } && ` +
+      `${venvRel}/bin/python -m pip install -q --disable-pip-version-check -e . >/dev/null 2>&1; ` +
+      `[ -f requirements.txt ] && ${venvRel}/bin/python -m pip install -q -r requirements.txt >/dev/null 2>&1; ` +
+      `[ -x ${venvRel}/bin/python ] && echo RK_VENV_OK || true`,
+    600_000,
+  );
+  if (!build.stdout.includes("RK_VENV_OK")) return "python3";
+  const abs = sandbox.exec(`printf %s "$(pwd)/${venvRel}/bin/python"`, 10_000);
+  return abs.stdout.trim() || `${venvRel}/bin/python`;
+}
+
 // The PoC-execution sandbox. Räuberkrebs's defining primitive: an attacker lane proves a vuln by
 // EXECUTING a payload, so that payload must run in isolation and never harm the host.
 //

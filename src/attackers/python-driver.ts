@@ -205,3 +205,65 @@ for mode in MODES:
 print("UNSAFE_DESER_NOFIRE")
 `.trim();
 }
+
+/**
+ * Driver for the command-approval differential oracle (the "the control believes this is safe, but it
+ * actually executes" class). For each discovered decision function and each adversarial command in the
+ * corpus: BELIEF = the control returns truthy for the command; GROUND TRUTH = running the command in a
+ * shell fires the benign marker. A divergence (believed-safe AND fired) is a proven bypass — the gate
+ * auto-approves a command carrying shell injection. A sound gate that rejects shell metacharacters
+ * correctly does NOT fire. `corpus` items are already marker-substituted by the lane.
+ */
+export function differentialOraclePythonDriver(
+  moduleFile: string,
+  fnNames: string[],
+  marker: string,
+  corpus: string[],
+): string {
+  const target = JSON.stringify(moduleFile);
+  const fns = JSON.stringify(fnNames);
+  const mk = JSON.stringify(marker);
+  const corpusJson = JSON.stringify(corpus);
+  return `
+import json
+import subprocess
+${PYTHON_LOAD_TARGET_SRC}
+
+MARKER = ${mk}
+CORPUS = ${corpusJson}
+FNS = ${fns}
+
+try:
+  mod = _load_target(${target})
+except Exception as e:
+  print("IMPORT_FAIL:" + repr(e))
+  raise SystemExit(0)
+
+
+def _ground_truth_fired(cmd):
+  # Run the command in a shell; fired = the benign marker actually executed. Time-boxed and benign.
+  try:
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=4)
+    return MARKER in (r.stdout + r.stderr)
+  except Exception as e:
+    out = getattr(e, "stdout", "") or ""
+    if isinstance(out, (bytes, bytearray)):
+      out = out.decode("utf-8", "replace")
+    return MARKER in out
+
+
+for fname in FNS:
+  fn = getattr(mod, fname, None)
+  if not callable(fn):
+    continue
+  for cmd in CORPUS:
+    try:
+      believed = bool(fn(cmd))
+    except Exception:
+      continue  # the control errored on this input — not a clean approval
+    if not believed:
+      continue  # control says unsafe -> it would block/prompt; not a bypass
+    if _ground_truth_fired(cmd):
+      print("RK_DIVERGENCE fn=" + fname + " " + json.dumps(cmd))
+`.trim();
+}

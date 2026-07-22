@@ -26,6 +26,7 @@ import { ZipSlipAttacker } from "./attackers/zip-slip.js";
 import { SqlInjectionAttacker } from "./attackers/sql-injection.js";
 import { StoredTaintAttacker } from "./attackers/stored-taint.js";
 import { PolicyBeliefDivergenceAttacker } from "./attackers/policy-belief-divergence.js";
+import { PolicyBeliefDivergencePythonAttacker } from "./attackers/policy-belief-divergence-python.js";
 import { PolicyBeliefDivergenceDotnetAttacker } from "./attackers/policy-belief-divergence-dotnet.js";
 import { AuthzFailOpenDotnetAttacker } from "./attackers/authz-fail-open-dotnet.js";
 import { SsrfDotnetAttacker } from "./attackers/ssrf-dotnet.js";
@@ -93,6 +94,7 @@ export const ATTACKERS: Attacker[] = [
   // belief vs ground truth. Node primitive in src/differential-oracle.ts; C# drive-and-prove
   // counterparts in src/attackers/dotnet-oracle.ts. See PLAYBOOK.md.
   PolicyBeliefDivergenceAttacker,
+  new PolicyBeliefDivergencePythonAttacker(),
   PolicyBeliefDivergenceDotnetAttacker, // C# command-approval oracle (compile + drive + fired marker)
   AuthzFailOpenDotnetAttacker, // C# differential-authz: a role gate that admits the null-authority principal
   // C# (.NET) static lanes — feed the sweep's guard-consistency signal for the Windows node; the

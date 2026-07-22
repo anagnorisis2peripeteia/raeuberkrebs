@@ -14,12 +14,15 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // fires the benign marker). A divergence — approved AND it executed injected code — is a proven
 // bypass of the gate. It correctly does NOT fire on a sound gate that rejects shell metacharacters.
 
-// A decision function is a `def name(arg, …)` whose name carries BOTH a decision verb AND a
-// command/safety noun — e.g. `is_command_safe`, `validate_command`, `can_run`, `is_allowed`. Requiring
-// both keeps generic predicates (`is_empty`, `validate_email`, `check_type`) out of the probe set.
-const DEF_RE = /^def\s+([A-Za-z_]\w*)\s*\(\s*[A-Za-z_]\w*(?:\s*,[^)]*)?\)\s*:/gm;
-const DECISION_VERB_RE = /(?:is|are|can|should|allow|approv|permit|authoriz|valid|check|sanitiz|verif|guard|trust|whitelist|screen|vet)/i;
-const CMD_SAFETY_RE = /(?:safe|command|cmd|exec|shell|run|allow|danger|block|trust|permit|whitelist|input|payload|script)/i;
+// A decision function this oracle can probe is a SAFE-POLARITY command-approval gate: one whose `True`
+// means "approved / safe / allowed". Only those can be bypassed by APPROVING an executing command.
+// Detector/blocker-polarity functions are deliberately EXCLUDED: for `is_dangerous` / `is_blocked` /
+// `has_shell_operator` / `detect_injection`, a `True` means "danger found" — the gate WORKING, not a
+// bypass — so probing them would false-positive. Discovery = a name with an APPROVE token and NO
+// danger/detector token. (`\s*` in DEF_RE spans typed + multiline signatures — see topLevelFunctions.)
+const DEF_RE = /^def\s+([A-Za-z_]\w*)\s*\(\s*[A-Za-z_*]/gm;
+const APPROVE_RE = /(?:safe|allow|permit|authoriz|approv|whitelist|trusted|is_valid|can_run|can_exec|is_ok)/i;
+const DANGER_RE = /(?:danger|block|deny|reject|malicious|injection|forbidden|suspicious|unsafe|invalid|has_|detect|contains|scan|violat|threat|attack|risk|sanitiz|guard|filter|strip|escap|prompt)/i;
 
 // Adversarial corpus: a plausibly-safe-looking prefix carrying an INJECTED marker via a shell
 // metacharacter. A gate that approves any of these has approved shell injection. `{{MARK}}` is
@@ -39,7 +42,7 @@ function decisionFunctions(source: string): string[] {
   const names: string[] = [];
   for (const m of source.matchAll(DEF_RE)) {
     const name = m[1];
-    if (DECISION_VERB_RE.test(name) && CMD_SAFETY_RE.test(name)) names.push(name);
+    if (APPROVE_RE.test(name) && !DANGER_RE.test(name)) names.push(name);
   }
   return [...new Set(names)];
 }

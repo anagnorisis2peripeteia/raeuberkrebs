@@ -83,6 +83,7 @@ export function ensurePythonEnv(sandbox: Sandbox, _targetDir: string): string {
   const cached = pyEnvCache.get(sandbox);
   if (cached) return cached;
   const py = buildPythonEnv(sandbox);
+  if (process.env.RAEUBER_PY_DEBUG) process.stderr.write(`RK_PYENV=${py}\n`);
   pyEnvCache.set(sandbox, py);
   return py;
 }
@@ -97,13 +98,23 @@ function buildPythonEnv(sandbox: Sandbox): string {
   if (!hasManifest.stdout.includes("RK_HAS_MANIFEST")) return "python3"; // nothing to install
   // Throwaway venv; best-effort editable install of the target + its requirements so third-party
   // imports resolve. Time-boxed — a real repo's deps can be slow — and failures fall back to python3.
+  // The base interpreter is overridable via RAEUBER_PY_BIN: a target often pins requires-python
+  // (e.g. `>=3.11,<3.14`), so the operator points at a compatible python (e.g. python3.11) when the
+  // default `python3` is out of range — otherwise `pip install -e .` refuses and the venv is empty.
+  const pyBin = (process.env.RAEUBER_PY_BIN || "python3").replace(/[^\w.\-/]/g, "");
   const venvRel = ".rk-venv";
+  // RK_VENV_OK is printed ONLY if an install actually SUCCEEDED — a bare venv whose deps failed to
+  // install must NOT masquerade as ready (that would silently false-clean every dep-needing module).
+  // Stable pip download cache on the host so repeated venv builds (each lane opens its own sandbox,
+  // and the sandbox HOME is a throwaway copy) reuse wheels instead of re-downloading every time.
   const build = sandbox.exec(
-    `python3 -m venv ${venvRel} >/dev/null 2>&1 && ` +
-      `{ [ -f pyproject.toml ] || [ -f setup.py ] || [ -f setup.cfg ]; } && ` +
-      `${venvRel}/bin/python -m pip install -q --disable-pip-version-check -e . >/dev/null 2>&1; ` +
-      `[ -f requirements.txt ] && ${venvRel}/bin/python -m pip install -q -r requirements.txt >/dev/null 2>&1; ` +
-      `[ -x ${venvRel}/bin/python ] && echo RK_VENV_OK || true`,
+    `export PIP_CACHE_DIR="\${TMPDIR:-/tmp}/rk-pip-cache"; ` +
+      `${pyBin} -m venv ${venvRel} >/dev/null 2>&1 || exit 0; ok=0; ` +
+      `if [ -f pyproject.toml ] || [ -f setup.py ] || [ -f setup.cfg ]; then ` +
+      `${venvRel}/bin/python -m pip install -q --disable-pip-version-check -e . >/dev/null 2>&1 && ok=1; fi; ` +
+      `if [ -f requirements.txt ]; then ` +
+      `${venvRel}/bin/python -m pip install -q -r requirements.txt >/dev/null 2>&1 && ok=1; fi; ` +
+      `[ "$ok" = 1 ] && echo RK_VENV_OK || true`,
     600_000,
   );
   if (!build.stdout.includes("RK_VENV_OK")) return "python3";

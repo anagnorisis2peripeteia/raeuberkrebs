@@ -258,6 +258,22 @@ describe("raeuberkrebs command-injection gate (Python lane)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("discovers and fires on a TYPE-ANNOTATED signature (not just un-annotated params)", () => {
+    const dir = scratch({
+      "app.py":
+        "import subprocess\n" +
+        "def run(cmd: str) -> str:\n" +
+        "  return subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout\n",
+    });
+    try {
+      const r = runRedteam(dir, ["app.py"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      assert.equal(r.exploits[0].attackClass, "command-injection");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("raeuberkrebs command-injection gate (Go lane)", () => {
@@ -494,6 +510,24 @@ describe("raeuberkrebs differential-oracle (policy-belief-divergence) — Python
     });
     try {
       const r = runRedteam(dir, ["safe.py"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "policy-belief-divergence").length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+      assert.ok(r.lanes.some((l) => l.attackClass === "policy-belief-divergence" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire on a DETECTOR-polarity function (True means danger found, not approval)", () => {
+    const dir = scratch({
+      // Returns True for an injection command — but its True means "danger detected", not "approved".
+      // Treating this as a bypass would be a false positive; the lane must exclude detector polarity.
+      "detector.py":
+        "def has_shell_operator(command: str) -> bool:\n" +
+        "  return any(op in command for op in [';', '|', '&&', '$(', '`'])\n",
+    });
+    try {
+      const r = runRedteam(dir, ["detector.py"], LOCAL);
       assert.equal(r.exploits.filter((x) => x.attackClass === "policy-belief-divergence").length, 0);
       assert.notEqual(r.verdict, "vulnerable");
       assert.ok(r.lanes.some((l) => l.attackClass === "policy-belief-divergence" && l.live));

@@ -455,6 +455,54 @@ describe("raeuberkrebs unsafe-deserialization gate (Python lane)", () => {
   });
 });
 
+describe("raeuberkrebs differential-oracle (policy-belief-divergence) — Python lane", () => {
+  const PY_ORACLE_FIXTURE = join(ROOT, "fixtures", "differential-oracle-python");
+  it("fires on the planted weak command-approval control (belief diverges from ground truth)", () => {
+    const r = runRedteam(PY_ORACLE_FIXTURE, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "policy-belief-divergence");
+    assert.ok(e, "expected a policy-belief-divergence exploit");
+    assert.equal(e.proof, "belief-diverged");
+    assert.match(e.evidence, /RAEUBER_[0-9a-f]+/);
+    assert.match(e.sink, /is_command_safe/);
+  });
+
+  it("fires on a NOVEL weak control that approves shell injection", () => {
+    const dir = scratch({
+      "gate.py":
+        "def is_command_allowed(cmd):\n" +
+        "  # only blocks the literal 'sudo' — approves everything else, including injection\n" +
+        "  return 'sudo' not in cmd\n",
+    });
+    try {
+      const r = runRedteam(dir, ["gate.py"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find((x) => x.attackClass === "policy-belief-divergence");
+      assert.ok(e, "expected a policy-belief-divergence exploit");
+      assert.equal(e.file, "gate.py");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire on a SOUND gate that rejects shell metacharacters", () => {
+    const dir = scratch({
+      "safe.py":
+        "import re\n\n" +
+        "def is_command_safe(cmd):\n" +
+        "  return re.fullmatch(r'[A-Za-z0-9_\\-./ ]+', cmd) is not None\n",
+    });
+    try {
+      const r = runRedteam(dir, ["safe.py"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "policy-belief-divergence").length, 0);
+      assert.notEqual(r.verdict, "vulnerable");
+      assert.ok(r.lanes.some((l) => l.attackClass === "policy-belief-divergence" && l.live));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
 
 describe("raeuberkrebs command-injection gate (Swift lane)", () => {

@@ -14,6 +14,7 @@ import { UntrustedSearchPathAttacker } from "../dist/attackers/untrusted-search-
 import { EvalParsedAstAttacker } from "../dist/attackers/eval-parsed-ast.js";
 import { PromptInjectionStaticAttacker } from "../dist/attackers/prompt-injection-static.js";
 import { NameFieldTraversalAttacker } from "../dist/attackers/name-field-traversal.js";
+import { InsecureDefaultAttacker } from "../dist/attackers/insecure-default.js";
 import { sweepRepo } from "../dist/sweep.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -1230,6 +1231,26 @@ describe("raeuberkrebs name-field traversal static lane (#102, CWE-22)", () => {
     assert.equal(lane.staticLeads('p = os.path.join(base, name.split("/")[-1])').length, 0, "split-and-take-last");
     assert.equal(lane.staticLeads('p = os.path.join(base, "static", "index.html")').length, 0, "string literals");
     assert.equal(lane.staticLeads('s = list.join(", ")').length, 0, "Array.join, not a path");
+  });
+});
+
+describe("raeuberkrebs insecure-default static lane (#103, CWE-1188)", () => {
+  const lane = new InsecureDefaultAttacker();
+  it("flags a security control whose config default disables it", () => {
+    assert.ok(lane.staticLeads('signature_mode = "disabled"').length >= 1, "signature_mode disabled");
+    assert.ok(lane.staticLeads("verify_tls = False").length >= 1, "verify_tls false");
+    assert.ok(lane.staticLeads("require_auth: false").length >= 1, "require_auth false");
+    assert.ok(lane.staticLeads("fn d() -> SignatureMode { SignatureMode::Disabled }").length >= 1, "enum Disabled default");
+    assert.ok(lane.staticLeads("allow_unsigned = true").length >= 1, "allow_unsigned true (inverted polarity)");
+    assert.ok(lane.staticLeads("insecure_skip_verify: true").length >= 1, "insecure_skip_verify true");
+  });
+
+  it("does NOT flag an enforcing default, an inverted-secure value, or a non-security field", () => {
+    assert.equal(lane.staticLeads('signature_mode = "strict"').length, 0, "strict default");
+    assert.equal(lane.staticLeads("verify_tls = True").length, 0, "verify_tls true");
+    assert.equal(lane.staticLeads("SignatureMode::Permissive").length, 0, "permissive is not the off value");
+    assert.equal(lane.staticLeads("allow_unsigned = false").length, 0, "allow_unsigned false is SECURE");
+    assert.equal(lane.staticLeads('log_level = "off"').length, 0, "not a security control");
   });
 });
 

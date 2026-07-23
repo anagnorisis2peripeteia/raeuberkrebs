@@ -37,6 +37,7 @@ import { WrapperCompletenessPythonAttacker } from "./attackers/wrapper-completen
 import { SensitivePathSpellingPythonAttacker } from "./attackers/sensitive-path-spelling-python.js";
 import { DecodeEvalCarrierPythonAttacker } from "./attackers/decode-eval-carrier-python.js";
 import { AssignmentIndirectionPythonAttacker } from "./attackers/assignment-indirection-python.js";
+import { RedactionCompletenessPythonAttacker } from "./attackers/redaction-completeness-python.js";
 import { PolicyBeliefDivergenceDotnetAttacker } from "./attackers/policy-belief-divergence-dotnet.js";
 import { AuthzFailOpenDotnetAttacker } from "./attackers/authz-fail-open-dotnet.js";
 import { SsrfDotnetAttacker } from "./attackers/ssrf-dotnet.js";
@@ -115,6 +116,7 @@ export const ATTACKERS: Attacker[] = [
   new SensitivePathSpellingPythonAttacker(), // #92 coverage-differential: gates ~/.ssh spelling, misses /home/u/.ssh + crontab persistence
   new DecodeEvalCarrierPythonAttacker(), // #105 coverage-differential: gates decoder|bash / eval $(curl), misses eval $(echo|base64 -d) / . <(curl)
   new AssignmentIndirectionPythonAttacker(), // #93 coverage-differential + runtime collapse proof: misses CMD=rm; $CMD -rf /
+  new RedactionCompletenessPythonAttacker(), // #89 drive-and-prove: secret battery survives an incomplete scrubber
   PolicyBeliefDivergenceDotnetAttacker, // C# command-approval oracle (compile + drive + fired marker)
   AuthzFailOpenDotnetAttacker, // C# differential-authz: a role gate that admits the null-authority principal
   // C# (.NET) static lanes — feed the sweep's guard-consistency signal for the Windows node; the

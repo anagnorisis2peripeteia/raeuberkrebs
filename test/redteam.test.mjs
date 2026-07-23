@@ -1063,6 +1063,53 @@ describe("raeuberkrebs assigned-variable command-name indirection coverage-diffe
   });
 });
 
+describe("raeuberkrebs redaction-completeness (secret battery) — Python lane (#89)", () => {
+  const REDACT_FIXTURE = join(ROOT, "fixtures", "redaction-completeness-python");
+  it("fires when a scrubber redacts AKIA but leaks the aws secret key / other formats", () => {
+    const r = runRedteam(REDACT_FIXTURE, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "secret-exposure" && x.proof === "secret-survived-redaction");
+    assert.ok(e, "expected a redaction-completeness exploit");
+    assert.match(e.sink, /redact_secrets/);
+    // the AKIA id IS redacted by the fixture, so the finding must be a DIFFERENT leaked format
+    assert.doesNotMatch(e.summary, /aws-access-key-id/);
+  });
+
+  it("does NOT fire on a scrubber that covers the full battery", () => {
+    const dir = scratch({
+      "safe.py":
+        "import re\n\n" +
+        "_PATTERNS = [\n" +
+        "  r'AKIA[0-9A-Z]{16}', r'aws_secret_access_key\\s*=\\s*\\S+', r'ghp_\\w+', r'xoxb-[\\w-]+',\n" +
+        "  r'sk_live_\\w+', r'eyJ[\\w-]+\\.[\\w-]+\\.[\\w-]+', r'://[^:@/]+:[^@/]+@', r'-----BEGIN[\\s\\S]*?-----END[^-]*-----',\n" +
+        "  r'AccountKey=\\S+', r'API_SECRET_TOKEN=\\S+',\n" +
+        "]\n" +
+        "_RX = re.compile('|'.join(_PATTERNS))\n\n" +
+        "def redact_secrets(text):\n" +
+        "  return _RX.sub('[REDACTED]', text)\n",
+    });
+    try {
+      const r = runRedteam(dir, ["safe.py"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "secret-exposure").length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fires hard on a no-op scrubber that redacts nothing (leaks every format)", () => {
+    const dir = scratch({
+      "noop.py": "def scrub_output(text):\n  return text  # redacts nothing\n",
+    });
+    try {
+      const r = runRedteam(dir, ["noop.py"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      assert.ok(r.exploits.filter((x) => x.attackClass === "secret-exposure").length >= 3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
 
 describe("raeuberkrebs command-injection gate (Swift lane)", () => {

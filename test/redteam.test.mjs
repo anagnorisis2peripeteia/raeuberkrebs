@@ -725,6 +725,44 @@ describe("raeuberkrebs defense-evasion carrier coverage-differential (#95) — P
   });
 });
 
+describe("raeuberkrebs catastrophic-destruction carrier coverage-differential (#98) — Python lane", () => {
+  const DESTRUCT_FIXTURE = join(ROOT, "fixtures", "catastrophic-destruction-carrier-python");
+  it("fires on a hardline guard that gates dd/mkfs but clears blkdiscard/wipefs/sgdisk/parted", () => {
+    const r = runRedteam(DESTRUCT_FIXTURE, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find(
+      (x) => x.attackClass === "policy-belief-divergence" && x.proof === "coverage-gap",
+    );
+    assert.ok(e, "expected a catastrophic-destruction coverage-gap exploit");
+    assert.match(e.sink, /is_hardline_command/);
+    assert.match(e.payload, /shred|wipefs|blkdiscard|sgdisk|parted/);
+    assert.match(e.payload, /\/dev\//); // the device target is the discriminator
+  });
+
+  it("does NOT report a coverage gap on a guard that also gates the device-destruction siblings", () => {
+    // Asserts only on THIS lane's finding (coverage-gap): a guard that gates the control AND every
+    // device-destruction carrier has no category gap. (The overall verdict is not asserted — a
+    // string-matching guard that never decodes ANSI-C quoting legitimately trips the separate
+    // normalization-differential lane, which is a different finding, not this lane's.)
+    const dir = scratch({
+      "sound.py":
+        "import re\n\n" +
+        "def is_hardline_command(command):\n" +
+        "  # gates any destructive-flag tool aimed at a raw /dev/ block device (control + carriers)\n" +
+        "  return re.search(r'(dd\\b.*of=/dev/|mkfs|shred\\b.*/dev/|wipefs\\s+-a\\s+/dev/|blkdiscard\\s+/dev/|sgdisk\\s+(?:--zap|-Z).*/dev/|parted\\b.*/dev/.*(rm|mklabel))', command) is not None\n",
+    });
+    try {
+      const r = runRedteam(dir, ["sound.py"], LOCAL);
+      assert.equal(
+        r.exploits.filter((x) => x.attackClass === "policy-belief-divergence" && x.proof === "coverage-gap").length,
+        0,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
 
 describe("raeuberkrebs command-injection gate (Swift lane)", () => {

@@ -343,6 +343,93 @@ for dname in DETECTORS:
 `.trim();
 }
 
+/**
+ * A same-line-assignment command-name indirection item. `control` is the resolved dangerous command
+ * the guard flags; `carrier` is its indirection form (`CMD=rm; $CMD -rf /`) the guard clears because it
+ * never resolves the assignment; `markerForm` is a BENIGN twin using the identical assignment mechanism
+ * but a marker-echo command (`V=echo; $V <MARK>`), run in bash to prove the mechanism resolves at
+ * runtime. Only `markerForm` is ever executed — the dangerous `carrier`/`control` are only classified.
+ */
+export interface AssignmentIndirectionItem {
+  control: string;
+  carrier: string;
+  /** benign marker-echo twin with `{{MARK}}` where the fresh marker is substituted. */
+  markerForm: string;
+  technique: string;
+}
+
+/**
+ * Driver for the assignment-indirection oracle (issue #93). For each discovered danger-detector and
+ * each item: fire when the detector FLAGS the resolved `control` but CLEARS the same-line-assignment
+ * `carrier`, AND bash proves the assignment mechanism resolves at runtime (the benign `markerForm`
+ * echoes the marker). The runtime proof distinguishes a real assignment-resolution bypass from a naive
+ * `$VAR` over-block: only a same-line assignment that actually collapses fires.
+ *
+ * Safety: the dangerous `control`/`carrier` are only passed to the pure classifier; the sole shell call
+ * runs the BENIGN `markerForm` (`V=echo; $V <marker>`), which echoes the marker and nothing else.
+ */
+export function assignmentIndirectionDriver(
+  moduleFile: string,
+  detectorNames: string[],
+  marker: string,
+  corpus: AssignmentIndirectionItem[],
+): string {
+  const target = JSON.stringify(moduleFile);
+  const detectors = JSON.stringify(detectorNames);
+  const mk = JSON.stringify(marker);
+  const corpusJson = JSON.stringify(corpus);
+  return `
+import json
+import subprocess
+${PYTHON_LOAD_TARGET_SRC}
+
+MARKER = ${mk}
+DETECTORS = ${detectors}
+CORPUS = ${corpusJson}
+
+try:
+  mod = _load_target(${target})
+except Exception as e:
+  print("IMPORT_FAIL:" + repr(e))
+  raise SystemExit(0)
+
+
+def _flagged(r):
+  if isinstance(r, (tuple, list)):
+    return bool(r[0]) if r else False
+  return bool(r)
+
+
+def _collapses(marker_form):
+  # Benign: run the marker-echo twin (V=echo; $V <marker>). The marker prints ONLY if the same-line
+  # assignment + expansion resolves at runtime — the mechanism the guard failed to model.
+  try:
+    r = subprocess.run(["bash", "-c", marker_form], capture_output=True, text=True, timeout=4)
+    return MARKER in (r.stdout + r.stderr)
+  except Exception:
+    return False
+
+
+for dname in DETECTORS:
+  d = getattr(mod, dname, None)
+  if not callable(d):
+    continue
+  for item in CORPUS:
+    try:
+      flagged_control = _flagged(d(item["control"]))
+      flagged_carrier = _flagged(d(item["carrier"]))
+    except Exception:
+      continue
+    if not (flagged_control and not flagged_carrier):
+      continue  # no verdict flip -> the guard is not evaded by this indirection
+    marker_form = item["markerForm"].replace("{{MARK}}", MARKER)
+    if _collapses(marker_form):
+      # guard flags the resolved command, clears its assignment-indirection form, and bash proves the
+      # assignment mechanism resolves at runtime -> a real hardline-floor bypass
+      print("RK_ASSIGN fn=" + dname + " " + json.dumps({"control": item["control"], "carrier": item["carrier"], "technique": item["technique"]}))
+`.trim();
+}
+
 /** A (dangerous seed, shell-obfuscated variant) pair whose forms bash expands identically. */
 export interface NormDiffItem {
   plain: string;

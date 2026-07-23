@@ -11,6 +11,7 @@ import { CommandInjectionAttacker } from "../dist/attackers/command-injection.js
 import { SsrfAttacker } from "../dist/attackers/ssrf.js";
 import { BrokenAccessControlAttacker } from "../dist/attackers/broken-access-control.js";
 import { UntrustedSearchPathAttacker } from "../dist/attackers/untrusted-search-path.js";
+import { EvalParsedAstAttacker } from "../dist/attackers/eval-parsed-ast.js";
 import { sweepRepo } from "../dist/sweep.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -1163,6 +1164,32 @@ describe("raeuberkrebs untrusted-search-path static lane (#101, CWE-426)", () =>
   it("is static-only (execute-gate skips it; leads feed the sweep)", () => {
     assert.equal(usp.staticOnly, true);
     assert.deepEqual(usp.hunt("/tmp", [], null), []);
+  });
+});
+
+describe("raeuberkrebs eval-of-parsed-AST static lane (#107, CWE-95)", () => {
+  const lane = new EvalParsedAstAttacker();
+  it("flags eval/exec of a parsed node's source text (Ruby / JS / Python)", () => {
+    assert.ok(lane.staticLeads("result = eval(node.slice)").length >= 1, "ruby eval(node.slice)");
+    assert.ok(lane.staticLeads("eval(assign.loc.expression.source)").length >= 1, "ruby loc source");
+    assert.ok(lane.staticLeads("return eval(sourceCode.getText(node))").length >= 1, "eslint getText");
+    assert.ok(lane.staticLeads("exec(ast.get_source_segment(src, node))").length >= 1, "python source segment");
+    assert.ok(lane.staticLeads("eval(astor.to_source(node))").length >= 1, "python astor");
+  });
+
+  it("does NOT flag a fixed string literal eval, a static extraction, or Array.slice", () => {
+    assert.equal(lane.staticLeads('eval("1 + 1")').length, 0, "fixed literal");
+    assert.equal(lane.staticLeads("value = node.slice if node.type == :str").length, 0, "static extraction, no eval");
+    assert.equal(lane.staticLeads("const x = config.slice(0, 5)").length, 0, "Array.slice, no eval");
+    assert.equal(lane.staticLeads("eval(config.slice(0, 5))").length, 0, "eval of Array.slice on a non-node var");
+  });
+
+  it("raises priority to high when the file also parses untrusted input", () => {
+    const withParser = 'ast = Prism.parse(src)\nresult = eval(node.slice)\n';
+    const leads = lane.staticLeads(withParser);
+    assert.ok(leads.length >= 1 && leads[0].priority === "high", "parser present -> high priority");
+    const noParser = lane.staticLeads("result = eval(node.slice)");
+    assert.equal(noParser[0].priority, undefined, "no parser -> undefined priority");
   });
 });
 

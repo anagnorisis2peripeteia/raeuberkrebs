@@ -591,6 +591,79 @@ describe("raeuberkrebs normalization-differential (guard fail-open) — Python l
   });
 });
 
+describe("raeuberkrebs reverse-shell / C2 carrier coverage-differential (#94) — Python lane", () => {
+  const REVSHELL_FIXTURE = join(ROOT, "fixtures", "reverse-shell-carrier-python");
+  it("fires on a guard that gates curl|sh but clears /dev/tcp / nc -e / socat EXEC reverse shells", () => {
+    const r = runRedteam(REVSHELL_FIXTURE, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find(
+      (x) => x.attackClass === "policy-belief-divergence" && x.proof === "coverage-gap",
+    );
+    assert.ok(e, "expected a reverse-shell coverage-gap exploit");
+    assert.match(e.sink, /is_dangerous_command/);
+    // the carrier is a real reverse shell the guard cleared (evades the curl|sh denylist)
+    assert.match(e.payload, /\/dev\/tcp|nc -e|socat|mkfifo/);
+    assert.match(e.evidence, /flagged/);
+    assert.match(e.evidence, /cleared/);
+  });
+
+  it("fires on a NOVEL bespoke guard with the same curl|sh-only coverage", () => {
+    const dir = scratch({
+      "guard.py":
+        "def is_blocked_command(command):\n" +
+        "  return 'curl' in command and '| sh' in command\n",
+    });
+    try {
+      const r = runRedteam(dir, ["guard.py"], LOCAL);
+      assert.equal(r.verdict, "vulnerable");
+      const e = r.exploits.find(
+        (x) => x.attackClass === "policy-belief-divergence" && x.proof === "coverage-gap",
+      );
+      assert.ok(e, "expected a reverse-shell coverage-gap exploit");
+      assert.equal(e.file, "guard.py");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT fire on a revshell-AWARE guard that also gates /dev/tcp / nc -e / socat", () => {
+    const dir = scratch({
+      "sound.py":
+        "def is_dangerous_command(command):\n" +
+        "  needles = ['| sh', '|sh', '/dev/tcp', '/dev/udp', ' -e ', ' -c /bin', '--exec', 'EXEC:', 'SYSTEM:', 'mkfifo']\n" +
+        "  return any(n in command for n in needles)\n",
+    });
+    try {
+      const r = runRedteam(dir, ["sound.py"], LOCAL);
+      assert.equal(
+        r.exploits.filter((x) => x.attackClass === "policy-belief-divergence" && x.proof === "coverage-gap").length,
+        0,
+      );
+      assert.notEqual(r.verdict, "vulnerable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT report a bypass for an INERT function that flags nothing (needs a real divergence)", () => {
+    const dir = scratch({
+      "inert.py":
+        "def is_dangerous_command(command):\n" +
+        "  return False\n",
+    });
+    try {
+      const r = runRedteam(dir, ["inert.py"], LOCAL);
+      assert.equal(
+        r.exploits.filter((x) => x.attackClass === "policy-belief-divergence" && x.proof === "coverage-gap").length,
+        0,
+      );
+      assert.notEqual(r.verdict, "vulnerable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
 
 describe("raeuberkrebs command-injection gate (Swift lane)", () => {

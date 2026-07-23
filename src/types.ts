@@ -40,6 +40,7 @@ export type AttackClass =
   | "weak-random" // a non-cryptographic RNG (System.Random) generates a security value (token/key/nonce/salt/otp) — predictable / brute-forceable (CWE-330/338)
   | "argument-injection" // untrusted input concatenated into a process ARGUMENT string (ProcessStartInfo.Arguments) rather than an arg list — injects extra flags to the spawned program (CWE-88)
   | "toctou" // a File/Directory.Exists check guards a later file op on the same path — the path can change between check and use (symlink race) (CWE-367)
+  | "secret-exposure" // a secret-redaction/scrubbing control leaves a known secret format un-redacted — a sentinel-carrying secret survives the scrubber (or is redacted in one context mode but leaked in another), so secrets reach the LLM/logs in cleartext (CWE-200)
   // A security-DECISION control (approval/allowlist/policy) BELIEVED an input safe/allowed, but running
   // that input in the sandbox fired the benign marker — the control's belief diverges from its actual
   // behavior, so it auto-approves something that executes. Found by the differential-oracle primitive
@@ -128,6 +129,12 @@ export type ExploitProof =
   // executed (the carrier is a curated, genuinely-dangerous sibling), and a fire requires the control
   // to still flag, so an inert function is never mistaken for a bypass (CWE-693 fail-open).
   | "coverage-gap"
+  // A secret-redaction/scrubbing control was driven with a battery of known secret formats, each
+  // carrying an unguessable sentinel, and a sentinel SURVIVED the scrubber (or survived in one context
+  // mode while being redacted in another) — proof the scrubber's coverage is incomplete and that secret
+  // format leaks in cleartext to the LLM / logs. Differential/observed: the surviving sentinel is the
+  // evidence, never spoofable (CWE-200).
+  | "secret-survived-redaction"
   // A role/permission authorization gate returned true (admitted) for a NULL-AUTHORITY principal — a
   // constructed caller carrying no roles and no claims. A correct role gate must deny the role-less
   // caller; admitting it is a fail-open authorization bypass. Proven by driving the gate in isolation

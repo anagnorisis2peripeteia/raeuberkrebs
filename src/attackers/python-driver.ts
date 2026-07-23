@@ -430,6 +430,136 @@ for dname in DETECTORS:
 `.trim();
 }
 
+/** A known secret format to drive a scrubber with. `secret` is a format-VALID instance carrying an
+ *  unguessable `sentinel` substring; a surviving `sentinel` in the scrubber's output proves that format
+ *  leaked. The sentinel is chosen format-valid (e.g. uppercase-hex for an `AKIA[0-9A-Z]{16}` body) so
+ *  embedding it does not itself break the pattern the scrubber matches — a false leak. */
+export interface SecretBatteryItem {
+  label: string;
+  secret: string;
+  sentinel: string;
+}
+
+/**
+ * Driver for the redaction-completeness oracle (issue #89). For each discovered scrub/redact function
+ * and each secret in the battery: call the function and fire when that secret's SENTINEL SURVIVES in
+ * the output (that format was not redacted). Because the sentinel is a format-valid substring of the
+ * secret token, a scrubber that redacts the token removes the sentinel; only a MISSED format leaks it.
+ * A function that returns its input unchanged (redacts nothing) leaks EVERY secret — a true finding.
+ */
+export function redactionCompletenessDriver(
+  moduleFile: string,
+  fnNames: string[],
+  battery: SecretBatteryItem[],
+): string {
+  const target = JSON.stringify(moduleFile);
+  const fns = JSON.stringify(fnNames);
+  const batteryJson = JSON.stringify(battery);
+  return `
+import json
+${PYTHON_LOAD_TARGET_SRC}
+
+FNS = ${fns}
+BATTERY = ${batteryJson}
+
+try:
+  mod = _load_target(${target})
+except Exception as e:
+  print("IMPORT_FAIL:" + repr(e))
+  raise SystemExit(0)
+
+
+def _scrub(fn, secret):
+  # Call the scrubber. Tolerate (text) or (text, extra) signatures; a raise means it did not scrub this
+  # input, which is itself a leak of the original (caller would fall back to the raw text).
+  try:
+    r = fn(secret)
+  except TypeError:
+    try:
+      r = fn(secret, False)
+    except Exception:
+      return secret
+  except Exception:
+    return secret
+  return r if isinstance(r, str) else (r[0] if isinstance(r, (tuple, list)) and r else str(r))
+
+
+for fname in FNS:
+  fn = getattr(mod, fname, None)
+  if not callable(fn):
+    continue
+  for item in BATTERY:
+    out = _scrub(fn, item["secret"])
+    if item["sentinel"] in out:
+      # the secret's format-valid sentinel survived the scrubber -> this format leaks in cleartext
+      print("RK_REDACT_LEAK fn=" + fname + " " + json.dumps({"label": item["label"]}))
+`.trim();
+}
+
+/**
+ * Driver for the redaction MODE-differential oracle (issue #91). Drives the SAME marker-carrying input
+ * across the scrubber's context modes (e.g. default vs `file_read=True`/`code_file=True`) and fires
+ * when the marker is REDACTED in one mode but SURVIVES in another — a self-contained inconsistency that
+ * needs no ground-truth "is this secret" list, only that two modes disagree for the same bytes.
+ *
+ * `modes` is a list of {name, kwargs} the driver calls as `fn(secret, **kwargs)`. `inputs` are
+ * marker-carrying config-secret forms; the source-code negatives (os.getenv, numeric consts) must be
+ * consistent across modes (redacted in all or passed in all) to avoid false positives.
+ */
+export function redactionModeDifferentialDriver(
+  moduleFile: string,
+  fnNames: string[],
+  inputs: SecretBatteryItem[],
+  modes: Array<{ name: string; kwargs: Record<string, unknown> }>,
+): string {
+  const target = JSON.stringify(moduleFile);
+  const fns = JSON.stringify(fnNames);
+  const inputsJson = JSON.stringify(inputs);
+  const modesJson = JSON.stringify(modes);
+  return `
+import json
+${PYTHON_LOAD_TARGET_SRC}
+
+FNS = ${fns}
+INPUTS = ${inputsJson}
+MODES = ${modesJson}
+
+try:
+  mod = _load_target(${target})
+except Exception as e:
+  print("IMPORT_FAIL:" + repr(e))
+  raise SystemExit(0)
+
+
+def _scrub(fn, secret, kwargs):
+  try:
+    r = fn(secret, **kwargs)
+  except TypeError:
+    return None  # this mode's signature does not apply to this function
+  except Exception:
+    return secret
+  return r if isinstance(r, str) else (r[0] if isinstance(r, (tuple, list)) and r else str(r))
+
+
+for fname in FNS:
+  fn = getattr(mod, fname, None)
+  if not callable(fn):
+    continue
+  for item in INPUTS:
+    verdicts = {}
+    for mode in MODES:
+      out = _scrub(fn, item["secret"], mode["kwargs"])
+      if out is None:
+        continue
+      verdicts[mode["name"]] = item["sentinel"] in out  # True = leaked in this mode
+    leaked = [m for m, v in verdicts.items() if v]
+    redacted = [m for m, v in verdicts.items() if not v]
+    if leaked and redacted:
+      # the same secret is redacted in one mode but leaks in another -> a mode-differential bug
+      print("RK_REDACT_MODEDIFF fn=" + fname + " " + json.dumps({"label": item["label"], "leaked_in": leaked, "redacted_in": redacted}))
+`.trim();
+}
+
 /** A (dangerous seed, shell-obfuscated variant) pair whose forms bash expands identically. */
 export interface NormDiffItem {
   plain: string;

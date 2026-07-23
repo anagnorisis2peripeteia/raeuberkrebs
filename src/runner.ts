@@ -31,6 +31,7 @@ import { GuardNormalizationDifferentialPythonAttacker } from "./attackers/guard-
 import { ReverseShellCarrierPythonAttacker } from "./attackers/reverse-shell-carrier-python.js";
 import { DefenseEvasionCarrierPythonAttacker } from "./attackers/defense-evasion-carrier-python.js";
 import { CatastrophicDestructionCarrierPythonAttacker } from "./attackers/catastrophic-destruction-carrier-python.js";
+import { SecureEraseCarrierPythonAttacker } from "./attackers/secure-erase-carrier-python.js";
 import { PolicyBeliefDivergenceDotnetAttacker } from "./attackers/policy-belief-divergence-dotnet.js";
 import { AuthzFailOpenDotnetAttacker } from "./attackers/authz-fail-open-dotnet.js";
 import { SsrfDotnetAttacker } from "./attackers/ssrf-dotnet.js";
@@ -103,6 +104,7 @@ export const ATTACKERS: Attacker[] = [
   new ReverseShellCarrierPythonAttacker(), // #94 coverage-differential: gates curl|sh, misses /dev/tcp revshell
   new DefenseEvasionCarrierPythonAttacker(), // #95 coverage-differential: gates systemctl stop, misses iptables -F / setenforce 0
   new CatastrophicDestructionCarrierPythonAttacker(), // #98 coverage-differential: gates dd/mkfs, misses shred/wipefs/blkdiscard/sgdisk/parted
+  new SecureEraseCarrierPythonAttacker(), // #99 coverage-differential: gates dd/mkfs, misses cryptsetup/nvme/hdparm/mdadm erase
   PolicyBeliefDivergenceDotnetAttacker, // C# command-approval oracle (compile + drive + fired marker)
   AuthzFailOpenDotnetAttacker, // C# differential-authz: a role gate that admits the null-authority principal
   // C# (.NET) static lanes — feed the sweep's guard-consistency signal for the Windows node; the

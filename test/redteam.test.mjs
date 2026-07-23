@@ -914,6 +914,43 @@ describe("raeuberkrebs wrapper-passthrough completeness coverage-differential (#
   });
 });
 
+describe("raeuberkrebs sensitive-path spelling-equivalence + persistence coverage-differential (#92) — Python lane", () => {
+  const SPELLING_FIXTURE = join(ROOT, "fixtures", "sensitive-path-spelling-python");
+  const isSpellGap = (x) =>
+    x.attackClass === "policy-belief-divergence" &&
+    x.proof === "coverage-gap" &&
+    /\.ssh|authorized_keys|crontab|chmod \+s|\.bashrc/.test(x.payload);
+
+  it("fires on a guard that gates ~/.ssh but clears /home/u/.ssh (same file) and crontab persistence", () => {
+    const r = runRedteam(SPELLING_FIXTURE, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const spelling = r.exploits.find((x) => isSpellGap(x) && /\/home\/|\/root\/|\/Users\/|^echo key >> \.ssh/.test(x.payload));
+    assert.ok(spelling, "expected a spelling-equivalence coverage-gap exploit");
+    const persistence = r.exploits.find((x) => isSpellGap(x) && /crontab|chmod \+s/.test(x.payload));
+    assert.ok(persistence, "expected a persistence-carrier coverage-gap exploit");
+    assert.match(spelling.sink, /is_dangerous_command/);
+  });
+
+  it("does NOT report a gap on a guard that normalizes the path (matches basename in any home spelling)", () => {
+    const dir = scratch({
+      "sound.py":
+        "import re\n\n" +
+        "def is_dangerous_command(command):\n" +
+        "  c = command\n" +
+        "  # matches the sensitive basename in ANY home spelling + covers crontab/setuid persistence\n" +
+        "  if re.search(r'\\.ssh/authorized_keys|/\\.(?:bashrc|zshrc|profile|netrc)\\b', c): return True\n" +
+        "  if re.search(r'\\bcrontab\\b|\\bchmod\\s+\\+s\\b', c): return True\n" +
+        "  return False\n",
+    });
+    try {
+      const r = runRedteam(dir, ["sound.py"], LOCAL);
+      assert.equal(r.exploits.filter(isSpellGap).length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
 
 describe("raeuberkrebs command-injection gate (Swift lane)", () => {

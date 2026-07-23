@@ -12,6 +12,7 @@ import { SsrfAttacker } from "../dist/attackers/ssrf.js";
 import { BrokenAccessControlAttacker } from "../dist/attackers/broken-access-control.js";
 import { UntrustedSearchPathAttacker } from "../dist/attackers/untrusted-search-path.js";
 import { EvalParsedAstAttacker } from "../dist/attackers/eval-parsed-ast.js";
+import { PromptInjectionStaticAttacker } from "../dist/attackers/prompt-injection-static.js";
 import { sweepRepo } from "../dist/sweep.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -1190,6 +1191,26 @@ describe("raeuberkrebs eval-of-parsed-AST static lane (#107, CWE-95)", () => {
     assert.ok(leads.length >= 1 && leads[0].priority === "high", "parser present -> high priority");
     const noParser = lane.staticLeads("result = eval(node.slice)");
     assert.equal(noParser[0].priority, undefined, "no parser -> undefined priority");
+  });
+});
+
+describe("raeuberkrebs LLM prompt-injection static lane (#86, CWE-1427)", () => {
+  const lane = new PromptInjectionStaticAttacker();
+  const withLLM = (fence) => `def j(cmd):\n  prompt = ${fence}\n  return call_llm(prompt)\n`;
+  it("flags an untrusted value in a fixed-delimiter judge prompt", () => {
+    assert.ok(lane.staticLeads(withLLM('f"<command>{cmd}</command>"')).length >= 1, "python f-string fence");
+    assert.ok(lane.staticLeads('const p = `<user_input>${x}</user_input>`;\nopenai.chat.completions.create({});').length >= 1, "js template fence");
+    assert.ok(lane.staticLeads(withLLM('"<command>%s</command>" % cmd')).length >= 1, "printf-style fence");
+  });
+
+  it("does NOT flag a nonce-fenced, structured, or fixed-text prompt (no fence-breakout)", () => {
+    assert.equal(lane.staticLeads(withLLM('f"<command_{nonce}>{cmd}</command_{nonce}>"')).length, 0, "per-call nonce delimiter");
+    assert.equal(lane.staticLeads('openai.chat.completions.create(messages=[{"role":"user","content":cmd}])').length, 0, "structured message");
+    assert.equal(lane.staticLeads(withLLM('f"<command>fixed text</command>"')).length, 0, "no interpolation");
+  });
+
+  it("does NOT flag a fixed-delimiter fence in a file with NO LLM call", () => {
+    assert.equal(lane.staticLeads('html = f"<command>{cmd}</command>"  # not an LLM prompt').length, 0);
   });
 });
 

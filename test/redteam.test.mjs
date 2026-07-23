@@ -664,6 +664,67 @@ describe("raeuberkrebs reverse-shell / C2 carrier coverage-differential (#94) �
   });
 });
 
+describe("raeuberkrebs defense-evasion carrier coverage-differential (#95) — Python lane", () => {
+  const DEFEVASION_FIXTURE = join(ROOT, "fixtures", "defense-evasion-carrier-python");
+  it("fires on a guard that gates systemctl stop but clears iptables -F / ufw disable / setenforce 0", () => {
+    const r = runRedteam(DEFEVASION_FIXTURE, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find(
+      (x) => x.attackClass === "policy-belief-divergence" && x.proof === "coverage-gap",
+    );
+    assert.ok(e, "expected a defense-evasion coverage-gap exploit");
+    assert.match(e.sink, /is_dangerous_command/);
+    assert.match(e.payload, /iptables|ufw|setenforce|auditctl|nft/);
+  });
+
+  it("does NOT fire on a guard that also gates the direct firewall/MAC/audit disables", () => {
+    const dir = scratch({
+      "sound.py":
+        "def is_dangerous_command(command):\n" +
+        "  needles = ['systemctl stop', 'iptables -f', 'iptables --flush', 'ip6tables -f', 'nft flush',\n" +
+        "             'ufw disable', 'setenforce 0', 'auditctl -e 0', 'auditctl -d', '-p input accept']\n" +
+        "  c = command.lower()\n" +
+        "  return any(n in c for n in needles)\n",
+    });
+    try {
+      const r = runRedteam(dir, ["sound.py"], LOCAL);
+      assert.equal(
+        r.exploits.filter((x) => x.attackClass === "policy-belief-divergence" && x.proof === "coverage-gap").length,
+        0,
+      );
+      assert.notEqual(r.verdict, "vulnerable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT flag the ENABLE/LIST direction (setenforce 1, iptables -L) as a bypass", () => {
+    // A guard that gates the disable direction but clears the enable/list direction is CORRECT — those
+    // aren't carriers, so no divergence should be reported (direction-awareness, not a coverage gap).
+    const dir = scratch({
+      "directional.py":
+        "def is_dangerous_command(command):\n" +
+        "  c = command.lower()\n" +
+        "  # gates the disable direction (incl. the control) AND every disable carrier -> no gap\n" +
+        "  if 'systemctl stop' in c: return True\n" +
+        "  if 'iptables -f' in c or 'iptables --flush' in c or 'ip6tables -f' in c: return True\n" +
+        "  if 'nft flush' in c or 'ufw disable' in c or 'setenforce 0' in c: return True\n" +
+        "  if 'auditctl -e 0' in c or 'auditctl -d' in c or '-p input accept' in c: return True\n" +
+        "  return False\n",
+    });
+    try {
+      const r = runRedteam(dir, ["directional.py"], LOCAL);
+      assert.equal(
+        r.exploits.filter((x) => x.attackClass === "policy-belief-divergence" && x.proof === "coverage-gap").length,
+        0,
+      );
+      assert.notEqual(r.verdict, "vulnerable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
 
 describe("raeuberkrebs command-injection gate (Swift lane)", () => {

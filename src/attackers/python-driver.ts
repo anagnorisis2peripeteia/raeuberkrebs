@@ -272,6 +272,77 @@ for fname in FNS:
 `.trim();
 }
 
+/**
+ * A (control, carrier) pair for a coverage-differential oracle. `control` is a command of a danger
+ * CATEGORY that a working guard already flags; `carrier` is an equivalent-intent command of the SAME
+ * category (a different tool/spelling reaching the same effect) that may slip an incomplete denylist.
+ * The finding is the VERDICT DIVERGENCE — the guard flags `control` but clears `carrier` — which
+ * proves a category coverage gap rather than a disabled guard (a fire requires `control` to still
+ * flag). Both strings are only ever passed to the target's pure classifier; neither is executed.
+ */
+export interface CoverageDiffItem {
+  control: string;
+  carrier: string;
+  category: string;
+  technique: string;
+}
+
+/**
+ * Driver for the coverage-differential oracle (incomplete-denylist detection). For each discovered
+ * danger-DETECTOR and each (control, carrier) pair: fire when the detector FLAGS the control but
+ * CLEARS the carrier of the same danger category. The `control`-flags requirement means an inert
+ * function (flags nothing) never fires — a divergence, not a disabled guard, is the signal.
+ *
+ * Safety: the detector is only ever called as a pure string classifier; NO carrier is ever executed
+ * (unlike the ground-truth oracle, this lane never runs a command). The carriers are curated,
+ * genuinely-dangerous siblings, so a flag-control-clear-carrier divergence is a real bypass.
+ */
+export function coverageDifferentialDriver(
+  moduleFile: string,
+  detectorNames: string[],
+  corpus: CoverageDiffItem[],
+): string {
+  const target = JSON.stringify(moduleFile);
+  const detectors = JSON.stringify(detectorNames);
+  const corpusJson = JSON.stringify(corpus);
+  return `
+import json
+${PYTHON_LOAD_TARGET_SRC}
+
+DETECTORS = ${detectors}
+CORPUS = ${corpusJson}
+
+try:
+  mod = _load_target(${target})
+except Exception as e:
+  print("IMPORT_FAIL:" + repr(e))
+  raise SystemExit(0)
+
+
+def _flagged(r):
+  # A detector's verdict: bool, or a tuple/list whose first element is the boolean (the common
+  # \`(is_dangerous, reason)\` / \`(matched, key, desc)\` shapes), or a truthy report object.
+  if isinstance(r, (tuple, list)):
+    return bool(r[0]) if r else False
+  return bool(r)
+
+
+for dname in DETECTORS:
+  d = getattr(mod, dname, None)
+  if not callable(d):
+    continue
+  for item in CORPUS:
+    try:
+      flagged_control = _flagged(d(item["control"]))
+      flagged_carrier = _flagged(d(item["carrier"]))
+    except Exception:
+      continue  # the control errored on an input -> not a clean divergence
+    if flagged_control and not flagged_carrier:
+      # guard flags a gated sibling of this danger category but clears the equivalent carrier -> gap
+      print("RK_COVERAGE fn=" + dname + " " + json.dumps(item))
+`.trim();
+}
+
 /** A (dangerous seed, shell-obfuscated variant) pair whose forms bash expands identically. */
 export interface NormDiffItem {
   plain: string;

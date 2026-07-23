@@ -28,6 +28,7 @@ import { StoredTaintAttacker } from "./attackers/stored-taint.js";
 import { PolicyBeliefDivergenceAttacker } from "./attackers/policy-belief-divergence.js";
 import { PolicyBeliefDivergencePythonAttacker } from "./attackers/policy-belief-divergence-python.js";
 import { GuardNormalizationDifferentialPythonAttacker } from "./attackers/guard-normalization-differential-python.js";
+import { ReverseShellCarrierPythonAttacker } from "./attackers/reverse-shell-carrier-python.js";
 import { PolicyBeliefDivergenceDotnetAttacker } from "./attackers/policy-belief-divergence-dotnet.js";
 import { AuthzFailOpenDotnetAttacker } from "./attackers/authz-fail-open-dotnet.js";
 import { SsrfDotnetAttacker } from "./attackers/ssrf-dotnet.js";
@@ -97,6 +98,7 @@ export const ATTACKERS: Attacker[] = [
   PolicyBeliefDivergenceAttacker,
   new PolicyBeliefDivergencePythonAttacker(),
   new GuardNormalizationDifferentialPythonAttacker(),
+  new ReverseShellCarrierPythonAttacker(), // #94 coverage-differential: gates curl|sh, misses /dev/tcp revshell
   PolicyBeliefDivergenceDotnetAttacker, // C# command-approval oracle (compile + drive + fired marker)
   AuthzFailOpenDotnetAttacker, // C# differential-authz: a role gate that admits the null-authority principal
   // C# (.NET) static lanes — feed the sweep's guard-consistency signal for the Windows node; the

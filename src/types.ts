@@ -121,6 +121,13 @@ export type ExploitProof =
   // in the sandbox — proof the control's belief diverges from actual behavior (it auto-approves
   // something that runs). Differential/observed like `privilege-escalated`: belief=safe, marker fires.
   | "belief-diverged"
+  // A command-safety control FLAGGED a known-dangerous CONTROL command of a danger category but CLEARED
+  // an equivalent-intent CARRIER of the SAME category (a different tool/spelling reaching the same
+  // effect) — an incomplete-denylist coverage gap. Differential/observed like `belief-diverged`: the
+  // divergence between two commands the guard should treat identically is the proof; neither command is
+  // executed (the carrier is a curated, genuinely-dangerous sibling), and a fire requires the control
+  // to still flag, so an inert function is never mistaken for a bypass (CWE-693 fail-open).
+  | "coverage-gap"
   // A role/permission authorization gate returned true (admitted) for a NULL-AUTHORITY principal — a
   // constructed caller carrying no roles and no claims. A correct role gate must deny the role-less
   // caller; admitting it is a fail-open authorization bypass. Proven by driving the gate in isolation

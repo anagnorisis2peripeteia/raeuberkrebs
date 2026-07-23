@@ -951,6 +951,63 @@ describe("raeuberkrebs sensitive-path spelling-equivalence + persistence coverag
   });
 });
 
+describe("raeuberkrebs decode-and-execute carrier coverage-differential (#105) — Python lane", () => {
+  const DECODE_FIXTURE = join(ROOT, "fixtures", "decode-eval-carrier-python");
+  const isDecodeGap = (x) =>
+    x.attackClass === "policy-belief-divergence" &&
+    x.proof === "coverage-gap" &&
+    (/\beval\b/.test(x.payload) || /source <\(|\.\s<\(/.test(x.payload));
+
+  it("fires on a guard that gates decoder|bash / eval $(curl) but clears eval $(echo|base64 -d) and . <(curl)", () => {
+    const r = runRedteam(DECODE_FIXTURE, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find(isDecodeGap);
+    assert.ok(e, "expected a decode-and-execute coverage-gap exploit");
+    assert.match(e.sink, /detect_dangerous_command/);
+    assert.match(e.payload, /base64|xxd|openssl|base32|<\(/);
+  });
+
+  it("does NOT report a gap on a guard that also flags decoder-in-substitution + <(curl|wget), and stays clean on eval $(ssh-agent)", () => {
+    const dir = scratch({
+      "sound.py":
+        "import re\n\n" +
+        "_DEC = r\"base64\\s+-d|base64\\s+--decode|base32\\s+-d|xxd\\s+-r|openssl\\s+(?:base64|enc)\\s+-d\"\n" +
+        "_CLASS3 = re.compile(r\"(?:\" + _DEC + r\"|curl|wget)\\s*\\|\\s*(?:ba|z|k)?sh\\b\")\n" +
+        "_CLASS2 = re.compile(r\"\\beval\\b.*(?:\\$\\(|`)\\s*(?:curl|wget)\\b\")\n" +
+        "_DECODE_SUB = re.compile(r\"(?:\\beval\\b|\\bsource\\b|(?:^|;|&&|\\|\\|)\\s*\\.\\s).*(?:\\$\\(|`|<\\().*(?:\" + _DEC + r\")\")\n" +
+        "_PROCSUB_REMOTE = re.compile(r\"<\\(\\s*(?:curl|wget)\\b\")\n\n" +
+        "def detect_dangerous_command(command):\n" +
+        "  return any(rx.search(command) for rx in (_CLASS2, _CLASS3, _DECODE_SUB, _PROCSUB_REMOTE))\n",
+    });
+    try {
+      const r = runRedteam(dir, ["sound.py"], LOCAL);
+      assert.equal(r.exploits.filter(isDecodeGap).length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT flag a benign eval idiom guard (eval $(ssh-agent), source venv/bin/activate)", () => {
+    // A guard that gates the real decode-eval carriers but clears benign eval idioms is CORRECT — the
+    // idioms carry no decoder / remote process-substitution, so they are not carriers and no gap fires.
+    const dir = scratch({
+      "idioms.py":
+        "import re\n\n" +
+        "_DEC = r\"base64\\s+-d|base32\\s+-d|xxd\\s+-r|openssl\\s+(?:base64|enc)\\s+-d\"\n" +
+        "_DECODE_SUB = re.compile(r\"(?:\\beval\\b|\\bsource\\b).*(?:\\$\\(|<\\().*(?:\" + _DEC + r\")\")\n" +
+        "_PROCSUB_REMOTE = re.compile(r\"<\\(\\s*(?:curl|wget)\\b\")\n\n" +
+        "def detect_dangerous_command(command):\n" +
+        "  return bool(_DECODE_SUB.search(command) or _PROCSUB_REMOTE.search(command))\n",
+    });
+    try {
+      const r = runRedteam(dir, ["idioms.py"], LOCAL);
+      assert.equal(r.exploits.filter(isDecodeGap).length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
 
 describe("raeuberkrebs command-injection gate (Swift lane)", () => {

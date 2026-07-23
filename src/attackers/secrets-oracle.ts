@@ -85,3 +85,24 @@ export function buildSecretBattery(): SecretBatteryItem[] {
   push("generic-env-secret", env, `API_SECRET_TOKEN=${env}`);
   return items;
 }
+
+/**
+ * A battery of CONFIG-secret assignment forms (env / yaml / json / ini), each carrying a high-entropy
+ * unguessable sentinel — for the mode-differential lane (#91), which drives the SAME input across a
+ * scrubber's context modes and fires when it is redacted in one mode but leaks in another. High-entropy
+ * values only (a real secret), so a source-code reference (`os.getenv(...)`, a small integer) is never
+ * a battery input — the mode difference that matters is a real secret leaking, not a code reference.
+ */
+export function buildConfigSecretBattery(): SecretBatteryItem[] {
+  const items: SecretBatteryItem[] = [];
+  const push = (label: string, sentinel: string, secret: string) => items.push({ label, sentinel, secret });
+  push("env-assignment", hex(28), "");
+  push("yaml-assignment", hex(28), "");
+  push("json-assignment", hex(28), "");
+  push("ini-assignment", hex(28), "");
+  items[0]!.secret = `DB_PASSWORD=${items[0]!.sentinel}`;
+  items[1]!.secret = `password: ${items[1]!.sentinel}`;
+  items[2]!.secret = `{"password": "${items[2]!.sentinel}"}`;
+  items[3]!.secret = `api_key = ${items[3]!.sentinel}`;
+  return items;
+}

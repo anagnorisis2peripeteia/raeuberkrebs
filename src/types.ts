@@ -135,6 +135,11 @@ export type ExploitProof =
   // format leaks in cleartext to the LLM / logs. Differential/observed: the surviving sentinel is the
   // evidence, never spoofable (CWE-200).
   | "secret-survived-redaction"
+  // A scrubber redacted the SAME secret in one context mode but LEAKED it in another (e.g. a
+  // `code_file`/`file_read` flag that skips an assignment pass) — a self-oracling inconsistency: the
+  // two modes disagree on the identical bytes, so a config file read through the leaking mode exposes
+  // the secret. Needs no ground-truth "is this secret" list, only the mode disagreement (CWE-200).
+  | "redaction-mode-inconsistent"
   // A role/permission authorization gate returned true (admitted) for a NULL-AUTHORITY principal — a
   // constructed caller carrying no roles and no claims. A correct role gate must deny the role-less
   // caller; admitting it is a fail-open authorization bypass. Proven by driving the gate in isolation

@@ -1110,6 +1110,37 @@ describe("raeuberkrebs redaction-completeness (secret battery) — Python lane (
   });
 });
 
+describe("raeuberkrebs redaction mode-differential — Python lane (#91)", () => {
+  const MODEDIFF_FIXTURE = join(ROOT, "fixtures", "redaction-mode-differential-python");
+  it("fires when a code_file flag skips the assignment pass (config secret leaks in one mode)", () => {
+    const r = runRedteam(MODEDIFF_FIXTURE, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find((x) => x.attackClass === "secret-exposure" && x.proof === "redaction-mode-inconsistent");
+    assert.ok(e, "expected a redaction mode-differential exploit");
+    assert.match(e.sink, /redact_sensitive_text/);
+    assert.match(e.summary, /LEAKED in \[.*code_file/); // leaked specifically in the code_file mode
+  });
+
+  it("does NOT fire a mode-differential on a scrubber that redacts CONSISTENTLY across modes", () => {
+    // Assert on THIS lane's proof (redaction-mode-inconsistent); the #89 completeness lane may still
+    // fire on the same scrubber for formats it doesn't cover — a different, correct finding.
+    const dir = scratch({
+      "consistent.py":
+        "import re\n\n" +
+        "_ASSIGN = re.compile(r\"(?i)\\b(password|db_password|api[_-]?key|secret)\\b\\s*[:=]\\s*[\\\"']?([^\\s\\\"',}]+)\")\n\n" +
+        "def scrub_secrets(text, code_file=False, file_read=False):\n" +
+        "  # same redaction in every mode -> no disagreement\n" +
+        "  return _ASSIGN.sub(lambda m: m.group(0).replace(m.group(2), '[REDACTED]'), text)\n",
+    });
+    try {
+      const r = runRedteam(dir, ["consistent.py"], LOCAL);
+      assert.equal(r.exploits.filter((x) => x.proof === "redaction-mode-inconsistent").length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
 
 describe("raeuberkrebs command-injection gate (Swift lane)", () => {

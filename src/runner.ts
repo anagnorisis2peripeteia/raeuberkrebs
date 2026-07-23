@@ -43,6 +43,7 @@ import { UntrustedSearchPathAttacker } from "./attackers/untrusted-search-path.j
 import { EvalParsedAstAttacker } from "./attackers/eval-parsed-ast.js";
 import { PromptInjectionStaticAttacker } from "./attackers/prompt-injection-static.js";
 import { NameFieldTraversalAttacker } from "./attackers/name-field-traversal.js";
+import { InsecureDefaultAttacker } from "./attackers/insecure-default.js";
 import { PolicyBeliefDivergenceDotnetAttacker } from "./attackers/policy-belief-divergence-dotnet.js";
 import { AuthzFailOpenDotnetAttacker } from "./attackers/authz-fail-open-dotnet.js";
 import { SsrfDotnetAttacker } from "./attackers/ssrf-dotnet.js";
@@ -132,6 +133,7 @@ export const ATTACKERS: Attacker[] = [
   new EvalParsedAstAttacker(), // #107 static lead: eval of a parsed-AST node's source text (CWE-95)
   new PromptInjectionStaticAttacker(), // #86 static lead: untrusted value in a fixed-delimiter LLM prompt (CWE-1427)
   new NameFieldTraversalAttacker(), // #102 static lead: name/id field joined to a base without a single-component check (CWE-22)
+  new InsecureDefaultAttacker(), // #103 static lead: a security control whose config default disables it (CWE-1188)
   new SsrfDotnetAttacker(),
   new PathTraversalDotnetAttacker(),
   new UnsafeDeserializationDotnetAttacker(),

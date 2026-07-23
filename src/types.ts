@@ -43,6 +43,7 @@ export type AttackClass =
   | "secret-exposure" // a secret-redaction/scrubbing control leaves a known secret format un-redacted — a sentinel-carrying secret survives the scrubber (or is redacted in one context mode but leaked in another), so secrets reach the LLM/logs in cleartext (CWE-200)
   | "untrusted-search-path" // a process is launched by a BARE program name resolved via $PATH/CWD (not a verified absolute/trusted path), so a same-named binary planted earlier on $PATH executes in the trusted process (CWE-426)
   | "prompt-injection" // an untrusted value is string-interpolated into an LLM prompt inside a FIXED, guessable delimiter with no escaping / no per-call nonce, so an attacker can break out of the fence and inject its own directive into a security-decision LLM (CWE-1427)
+  | "insecure-default" // a security control (signature verify, auth, TLS, sandbox) ships DISABLED by default — its config default is the off/false/permissive value — so an out-of-the-box deployment gets no protection (CWE-1188, often amplifying CWE-347/CWE-306)
   // A security-DECISION control (approval/allowlist/policy) BELIEVED an input safe/allowed, but running
   // that input in the sandbox fired the benign marker — the control's belief diverges from its actual
   // behavior, so it auto-approves something that executes. Found by the differential-oracle primitive

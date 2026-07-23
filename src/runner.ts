@@ -39,6 +39,7 @@ import { DecodeEvalCarrierPythonAttacker } from "./attackers/decode-eval-carrier
 import { AssignmentIndirectionPythonAttacker } from "./attackers/assignment-indirection-python.js";
 import { RedactionCompletenessPythonAttacker } from "./attackers/redaction-completeness-python.js";
 import { RedactionModeDifferentialPythonAttacker } from "./attackers/redaction-mode-differential-python.js";
+import { UntrustedSearchPathAttacker } from "./attackers/untrusted-search-path.js";
 import { PolicyBeliefDivergenceDotnetAttacker } from "./attackers/policy-belief-divergence-dotnet.js";
 import { AuthzFailOpenDotnetAttacker } from "./attackers/authz-fail-open-dotnet.js";
 import { SsrfDotnetAttacker } from "./attackers/ssrf-dotnet.js";
@@ -124,6 +125,7 @@ export const ATTACKERS: Attacker[] = [
   // C# (.NET) static lanes — feed the sweep's guard-consistency signal for the Windows node; the
   // execute-gate skips them (staticOnly), so proof is per-lead. Command-injection has its own
   // drive-and-prove .NET lane above (CommandInjectionDotnetAttacker).
+  new UntrustedSearchPathAttacker(), // #101 static lead: bare-name $PATH launch without a trusted-location gate (CWE-426)
   new SsrfDotnetAttacker(),
   new PathTraversalDotnetAttacker(),
   new UnsafeDeserializationDotnetAttacker(),

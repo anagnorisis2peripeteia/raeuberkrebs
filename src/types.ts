@@ -41,6 +41,7 @@ export type AttackClass =
   | "argument-injection" // untrusted input concatenated into a process ARGUMENT string (ProcessStartInfo.Arguments) rather than an arg list — injects extra flags to the spawned program (CWE-88)
   | "toctou" // a File/Directory.Exists check guards a later file op on the same path — the path can change between check and use (symlink race) (CWE-367)
   | "secret-exposure" // a secret-redaction/scrubbing control leaves a known secret format un-redacted — a sentinel-carrying secret survives the scrubber (or is redacted in one context mode but leaked in another), so secrets reach the LLM/logs in cleartext (CWE-200)
+  | "untrusted-search-path" // a process is launched by a BARE program name resolved via $PATH/CWD (not a verified absolute/trusted path), so a same-named binary planted earlier on $PATH executes in the trusted process (CWE-426)
   // A security-DECISION control (approval/allowlist/policy) BELIEVED an input safe/allowed, but running
   // that input in the sandbox fired the benign marker — the control's belief diverges from its actual
   // behavior, so it auto-approves something that executes. Found by the differential-oracle primitive

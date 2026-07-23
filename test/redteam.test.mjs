@@ -10,6 +10,7 @@ import { runRedteam } from "../dist/runner.js";
 import { CommandInjectionAttacker } from "../dist/attackers/command-injection.js";
 import { SsrfAttacker } from "../dist/attackers/ssrf.js";
 import { BrokenAccessControlAttacker } from "../dist/attackers/broken-access-control.js";
+import { UntrustedSearchPathAttacker } from "../dist/attackers/untrusted-search-path.js";
 import { sweepRepo } from "../dist/sweep.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -1138,6 +1139,30 @@ describe("raeuberkrebs redaction mode-differential — Python lane (#91)", () =>
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("raeuberkrebs untrusted-search-path static lane (#101, CWE-426)", () => {
+  const usp = new UntrustedSearchPathAttacker();
+  it("flags a bare-name process launch resolved via $PATH (Node/Python/Go/Rust)", () => {
+    assert.ok(usp.staticLeads('const p = spawn("codex", args);').length >= 1, "node spawn bare name");
+    assert.ok(usp.staticLeads('r = subprocess.run(["rg", "-n", q])').length >= 1, "python subprocess bare name");
+    assert.ok(usp.staticLeads('cmd := exec.Command("git", "status")').length >= 1, "go exec.Command bare name");
+    assert.ok(usp.staticLeads('let c = Command::new("claude");').length >= 1, "rust Command::new bare name");
+    assert.ok(usp.staticLeads('const path = which("gws");').length >= 1, "which() bare-name resolver");
+  });
+
+  it("does NOT flag an absolute / trusted-dir path, a ./relative path, or a variable program", () => {
+    assert.equal(usp.staticLeads('spawn("/usr/local/bin/codex", args)').length, 0, "absolute path is trusted-location");
+    assert.equal(usp.staticLeads('exec.Command("/opt/tools/git")').length, 0, "go absolute path");
+    assert.equal(usp.staticLeads('Command::new("./bin/codex")').length, 0, "relative ./ path");
+    assert.equal(usp.staticLeads("spawn(userProvidedProgram, args)").length, 0, "variable program (not a bare literal)");
+    assert.equal(usp.staticLeads('subprocess.run([f"{TRUSTED_DIR}/rg", q])').length, 0, "interpolated trusted-dir path");
+  });
+
+  it("is static-only (execute-gate skips it; leads feed the sweep)", () => {
+    assert.equal(usp.staticOnly, true);
+    assert.deepEqual(usp.hunt("/tmp", [], null), []);
   });
 });
 

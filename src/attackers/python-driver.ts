@@ -515,14 +515,16 @@ export function redactionModeDifferentialDriver(
   const target = JSON.stringify(moduleFile);
   const fns = JSON.stringify(fnNames);
   const inputsJson = JSON.stringify(inputs);
-  const modesJson = JSON.stringify(modes);
+  // MODES contains JSON booleans in kwargs (true/false), which are not valid Python literals — decode
+  // it with json.loads from a double-encoded string so the kwargs become real Python bools.
+  const modesLiteral = JSON.stringify(JSON.stringify(modes));
   return `
 import json
 ${PYTHON_LOAD_TARGET_SRC}
 
 FNS = ${fns}
 INPUTS = ${inputsJson}
-MODES = ${modesJson}
+MODES = json.loads(${modesLiteral})
 
 try:
   mod = _load_target(${target})

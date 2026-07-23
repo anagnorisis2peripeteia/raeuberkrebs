@@ -13,6 +13,7 @@ import { BrokenAccessControlAttacker } from "../dist/attackers/broken-access-con
 import { UntrustedSearchPathAttacker } from "../dist/attackers/untrusted-search-path.js";
 import { EvalParsedAstAttacker } from "../dist/attackers/eval-parsed-ast.js";
 import { PromptInjectionStaticAttacker } from "../dist/attackers/prompt-injection-static.js";
+import { NameFieldTraversalAttacker } from "../dist/attackers/name-field-traversal.js";
 import { sweepRepo } from "../dist/sweep.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -1211,6 +1212,24 @@ describe("raeuberkrebs LLM prompt-injection static lane (#86, CWE-1427)", () => 
 
   it("does NOT flag a fixed-delimiter fence in a file with NO LLM call", () => {
     assert.equal(lane.staticLeads('html = f"<command>{cmd}</command>"  # not an LLM prompt').length, 0);
+  });
+});
+
+describe("raeuberkrebs name-field traversal static lane (#102, CWE-22)", () => {
+  const lane = new NameFieldTraversalAttacker();
+  it("flags a name/id field joined to a base without a single-component check", () => {
+    assert.ok(lane.staticLeads("dst = os.path.join(base, backup_name)").length >= 1, "python backup_name");
+    assert.ok(lane.staticLeads("let target = base.join(wasm_path);").length >= 1, "rust wasm_path");
+    assert.ok(lane.staticLeads("full := filepath.Join(dir, attachment_id)").length >= 1, "go attachment_id");
+    assert.ok(lane.staticLeads("p = path.join(workspace, pkg_name)").length >= 1, "node pkg_name");
+  });
+
+  it("does NOT flag a basename/single-component-validated, split, or literal component", () => {
+    assert.equal(lane.staticLeads("p = os.path.join(base, os.path.basename(name))").length, 0, "basename-wrapped");
+    assert.equal(lane.staticLeads("p = os.path.join(base, secure_component(backup_name))").length, 0, "validator-wrapped");
+    assert.equal(lane.staticLeads('p = os.path.join(base, name.split("/")[-1])').length, 0, "split-and-take-last");
+    assert.equal(lane.staticLeads('p = os.path.join(base, "static", "index.html")').length, 0, "string literals");
+    assert.equal(lane.staticLeads('s = list.join(", ")').length, 0, "Array.join, not a path");
   });
 });
 

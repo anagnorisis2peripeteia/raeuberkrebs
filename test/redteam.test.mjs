@@ -859,6 +859,61 @@ describe("raeuberkrebs pipe-to-shell wrapper-passthrough coverage-differential (
   });
 });
 
+describe("raeuberkrebs wrapper-passthrough completeness coverage-differential (#96) — Python lane", () => {
+  const WRAPCOMPLETE_FIXTURE = join(ROOT, "fixtures", "wrapper-completeness-python");
+  // Isolate THIS lane by its carrier signature: an unthreaded wrapper at the COMMAND START (or the
+  // structural find/xargs forms). A curl|sh-anchored guard also trips the sibling #94 / #100 lanes.
+  const isWrapGap = (x) =>
+    x.attackClass === "policy-belief-divergence" &&
+    x.proof === "coverage-gap" &&
+    (/^\s*(?:timeout|nice|stdbuf|ionice|taskset|chrt|doas|runuser|find)\b/.test(x.payload) || /xargs\s+-I/.test(x.payload));
+
+  it("fires on a guard that threads sudo/env but not timeout/nice/find-exec (inner command hidden)", () => {
+    const r = runRedteam(WRAPCOMPLETE_FIXTURE, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find(isWrapGap);
+    assert.ok(e, "expected a wrapper-passthrough coverage-gap exploit");
+    assert.match(e.sink, /is_dangerous_command/);
+    assert.match(e.payload, /timeout|nice|stdbuf|ionice|taskset|chrt|doas|runuser|find|xargs/);
+  });
+
+  it("closes the PREFIX-wrapper gap on a guard that threads timeout/nice/… — only the structural residual remains", () => {
+    // A guard that threads the resource/timing PREFIX wrappers (timeout/nice/stdbuf/…) has NO
+    // prefix-wrapper gap — the lane must not false-fire on those. The harder STRUCTURAL wrappers
+    // (find -exec / xargs), which this guard still doesn't thread, remain a known residual the lane
+    // honestly reports (labelled by technique), matching the issue's "report which class each is".
+    const dir = scratch({
+      "sound.py":
+        "import re\n\n" +
+        "_WRAP = re.compile(r\"^\\s*(?:sudo(?:\\s+-\\w+)*|env(?:\\s+\\w+=\\S+)*|exec|nohup|setsid|time|command|builtin|timeout\\s+\\S+|nice(?:\\s+-n\\s*\\d+)?|stdbuf\\s+\\S+|ionice\\s+\\S+|taskset\\s+\\S+\\s+\\S+|chrt\\s+\\S+\\s+\\S+|doas|runuser(?:\\s+-u\\s+\\S+)?)\\s+\")\n" +
+        "_SH_C = re.compile(r\"^\\s*(?:ba)?sh\\s+-c\\s+(['\\\"])(.*)\\1\\s*$\")\n" +
+        "_DANGER = re.compile(r\"^\\s*(?:curl\\b.*\\|\\s*(?:ba)?sh\\b|rm\\s+-rf\\b)\")\n\n" +
+        "def is_dangerous_command(command):\n" +
+        "  c = command\n" +
+        "  for _ in range(8):\n" +
+        "    s = _WRAP.sub('', c)\n" +
+        "    m = _SH_C.match(s)\n" +
+        "    if m: s = m.group(2)\n" +
+        "    if s == c: break\n" +
+        "    c = s\n" +
+        "  return _DANGER.search(c) is not None\n",
+    });
+    try {
+      const r = runRedteam(dir, ["sound.py"], LOCAL);
+      const gaps = r.exploits.filter(isWrapGap);
+      // prefix resource/timing wrappers are threaded -> no prefix-wrapper gap remains
+      assert.equal(
+        gaps.filter((x) => /^\s*(?:timeout|nice|stdbuf|ionice|taskset|chrt|doas|runuser)\b/.test(x.payload)).length,
+        0,
+      );
+      // only the harder structural find/xargs residual is left (honest, labelled by technique)
+      assert.ok(gaps.every((x) => /find|xargs/.test(x.payload)));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
 
 describe("raeuberkrebs command-injection gate (Swift lane)", () => {

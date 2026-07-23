@@ -33,6 +33,7 @@ import { DefenseEvasionCarrierPythonAttacker } from "./attackers/defense-evasion
 import { CatastrophicDestructionCarrierPythonAttacker } from "./attackers/catastrophic-destruction-carrier-python.js";
 import { SecureEraseCarrierPythonAttacker } from "./attackers/secure-erase-carrier-python.js";
 import { PipeWrapperPassthroughPythonAttacker } from "./attackers/pipe-wrapper-passthrough-python.js";
+import { WrapperCompletenessPythonAttacker } from "./attackers/wrapper-completeness-python.js";
 import { PolicyBeliefDivergenceDotnetAttacker } from "./attackers/policy-belief-divergence-dotnet.js";
 import { AuthzFailOpenDotnetAttacker } from "./attackers/authz-fail-open-dotnet.js";
 import { SsrfDotnetAttacker } from "./attackers/ssrf-dotnet.js";
@@ -107,6 +108,7 @@ export const ATTACKERS: Attacker[] = [
   new CatastrophicDestructionCarrierPythonAttacker(), // #98 coverage-differential: gates dd/mkfs, misses shred/wipefs/blkdiscard/sgdisk/parted
   new SecureEraseCarrierPythonAttacker(), // #99 coverage-differential: gates dd/mkfs, misses cryptsetup/nvme/hdparm/mdadm erase
   new PipeWrapperPassthroughPythonAttacker(), // #100 coverage-differential: gates curl|bash, misses curl|sudo bash (wrapper on pipe RHS)
+  new WrapperCompletenessPythonAttacker(), // #96 coverage-differential: threads sudo/env but not timeout/nice/find-exec (wrapper at command start)
   PolicyBeliefDivergenceDotnetAttacker, // C# command-approval oracle (compile + drive + fired marker)
   AuthzFailOpenDotnetAttacker, // C# differential-authz: a role gate that admits the null-authority principal
   // C# (.NET) static lanes — feed the sweep's guard-consistency signal for the Windows node; the

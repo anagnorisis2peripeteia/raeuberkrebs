@@ -1008,6 +1008,61 @@ describe("raeuberkrebs decode-and-execute carrier coverage-differential (#105) �
   });
 });
 
+describe("raeuberkrebs assigned-variable command-name indirection coverage-differential (#93) — Python lane", () => {
+  const ASSIGN_FIXTURE = join(ROOT, "fixtures", "assignment-indirection-python");
+  const isAssignGap = (x) =>
+    x.attackClass === "policy-belief-divergence" && x.proof === "coverage-gap" && /=rm\b|\$CMD|\$a\$b|\$\{X\}|\$X\b/.test(x.payload);
+
+  it("fires on a guard that flags rm -rf / but clears CMD=rm; $CMD -rf / (runtime collapse proven)", () => {
+    const r = runRedteam(ASSIGN_FIXTURE, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find(isAssignGap);
+    assert.ok(e, "expected an assignment-indirection coverage-gap exploit");
+    assert.match(e.sink, /is_dangerous_command/);
+    assert.match(e.payload, /=rm|\$CMD|\$a\$b/);
+    assert.match(e.evidence, /RAEUBER_[0-9a-f]+/); // the benign marker twin echoed the fresh marker
+  });
+
+  it("does NOT report a gap on a guard that resolves same-line VAR=value before matching", () => {
+    const dir = scratch({
+      "sound.py":
+        "import re\n\n" +
+        "def is_dangerous_command(command):\n" +
+        "  # resolve simple same-line VAR=value assignments, then substitute $VAR/${VAR}/adjacent concat\n" +
+        "  env = dict(re.findall(r'([A-Za-z_]\\w*)=([^\\s;]+)', command))\n" +
+        "  c = command\n" +
+        "  for k, v in env.items():\n" +
+        "    c = re.sub(r'\\$\\{' + k + r'\\}|\\$' + k + r'\\b', v, c)\n" +
+        "  return re.search(r'\\brm\\s+-rf\\b', c) is not None\n",
+    });
+    try {
+      const r = runRedteam(dir, ["sound.py"], LOCAL);
+      assert.equal(r.exploits.filter(isAssignGap).length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT flag an env-configured invocation ($PYTHON script.py) — var not assigned on the line", () => {
+    // $PYTHON is NOT assigned on the command line, so there is no same-line assignment to resolve and no
+    // carrier collapses — the lane must not over-block legitimate env-configured invocations.
+    const dir = scratch({
+      "envguard.py":
+        "import re\n\n" +
+        "def is_dangerous_command(command):\n" +
+        "  return re.search(r'\\brm\\s+-rf\\b', command) is not None\n",
+    });
+    try {
+      const r = runRedteam(dir, ["envguard.py"], LOCAL);
+      // this guard is the same shape as the fixture, so it DOES have the assignment gap — but assert the
+      // lane never emits a finding whose payload is a benign env invocation like `$PYTHON script.py`.
+      assert.ok(r.exploits.every((x) => !/\$PYTHON|\$EDITOR|\$VENV/.test(x.payload)));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
 
 describe("raeuberkrebs command-injection gate (Swift lane)", () => {

@@ -818,6 +818,47 @@ describe("raeuberkrebs secure-erase / crypto-erase carrier coverage-differential
   });
 });
 
+describe("raeuberkrebs pipe-to-shell wrapper-passthrough coverage-differential (#100) — Python lane", () => {
+  const PIPEWRAP_FIXTURE = join(ROOT, "fixtures", "pipe-wrapper-passthrough-python");
+  // Isolate THIS lane by its carrier signature: a wrapper word sitting between a pipe and the shell.
+  // (A `|sh` guard also trips the sibling #94 revshell lane, whose control `curl|sh` it flags.)
+  const isWrapperGap = (x) =>
+    x.attackClass === "policy-belief-divergence" &&
+    x.proof === "coverage-gap" &&
+    /\|\s*(?:sudo|doas|env|command|exec|nohup|setsid|time|timeout|stdbuf|ionice|nice)\b/.test(x.payload);
+
+  it("fires on a guard that gates curl|bash but clears curl|sudo bash (wrapper on the pipe RHS)", () => {
+    const r = runRedteam(PIPEWRAP_FIXTURE, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find(isWrapperGap);
+    assert.ok(e, "expected a pipe-wrapper coverage-gap exploit");
+    assert.match(e.sink, /is_dangerous_command/);
+    assert.match(e.payload, /\|\s*sudo\s+bash|\|\s*env\s+bash|\|\s*command\s+bash/);
+  });
+
+  it("does NOT report a wrapper gap on a guard that threads the wrapper and re-judges the pipe RHS", () => {
+    const dir = scratch({
+      "sound.py":
+        "import re\n\n" +
+        "_WRAP = r'\\|\\s*(?:sudo(?:\\s+-\\w+)?|doas|env|command|exec|nohup|setsid|time|timeout(?:\\s+\\S+)?|stdbuf(?:\\s+\\S+)?|ionice(?:\\s+\\S+)?|nice(?:\\s+-n\\s*\\d+)?)\\s+'\n\n" +
+        "def is_dangerous_command(command):\n" +
+        "  # strip a passthrough wrapper after the pipe, then re-check for pipe-to-shell\n" +
+        "  c = command\n" +
+        "  for _ in range(4):\n" +
+        "    c2 = re.sub(_WRAP, '| ', c)\n" +
+        "    if c2 == c: break\n" +
+        "    c = c2\n" +
+        "  return re.search(r'\\|\\s*(?:ba)?sh\\b', c) is not None\n",
+    });
+    try {
+      const r = runRedteam(dir, ["sound.py"], LOCAL);
+      assert.equal(r.exploits.filter(isWrapperGap).length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
 
 describe("raeuberkrebs command-injection gate (Swift lane)", () => {

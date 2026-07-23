@@ -34,6 +34,7 @@ import { CatastrophicDestructionCarrierPythonAttacker } from "./attackers/catast
 import { SecureEraseCarrierPythonAttacker } from "./attackers/secure-erase-carrier-python.js";
 import { PipeWrapperPassthroughPythonAttacker } from "./attackers/pipe-wrapper-passthrough-python.js";
 import { WrapperCompletenessPythonAttacker } from "./attackers/wrapper-completeness-python.js";
+import { SensitivePathSpellingPythonAttacker } from "./attackers/sensitive-path-spelling-python.js";
 import { PolicyBeliefDivergenceDotnetAttacker } from "./attackers/policy-belief-divergence-dotnet.js";
 import { AuthzFailOpenDotnetAttacker } from "./attackers/authz-fail-open-dotnet.js";
 import { SsrfDotnetAttacker } from "./attackers/ssrf-dotnet.js";
@@ -109,6 +110,7 @@ export const ATTACKERS: Attacker[] = [
   new SecureEraseCarrierPythonAttacker(), // #99 coverage-differential: gates dd/mkfs, misses cryptsetup/nvme/hdparm/mdadm erase
   new PipeWrapperPassthroughPythonAttacker(), // #100 coverage-differential: gates curl|bash, misses curl|sudo bash (wrapper on pipe RHS)
   new WrapperCompletenessPythonAttacker(), // #96 coverage-differential: threads sudo/env but not timeout/nice/find-exec (wrapper at command start)
+  new SensitivePathSpellingPythonAttacker(), // #92 coverage-differential: gates ~/.ssh spelling, misses /home/u/.ssh + crontab persistence
   PolicyBeliefDivergenceDotnetAttacker, // C# command-approval oracle (compile + drive + fired marker)
   AuthzFailOpenDotnetAttacker, // C# differential-authz: a role gate that admits the null-authority principal
   // C# (.NET) static lanes — feed the sweep's guard-consistency signal for the Windows node; the

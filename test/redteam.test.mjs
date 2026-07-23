@@ -763,6 +763,61 @@ describe("raeuberkrebs catastrophic-destruction carrier coverage-differential (#
   });
 });
 
+describe("raeuberkrebs secure-erase / crypto-erase carrier coverage-differential (#99) — Python lane", () => {
+  const ERASE_FIXTURE = join(ROOT, "fixtures", "secure-erase-carrier-python");
+  // Isolate THIS lane's findings by its carrier signature — a `dd`/`mkfs` guard also trips the sibling
+  // #98 (shred/wipefs) lane, so filter coverage-gap exploits down to the secure-erase carriers.
+  const isEraseGap = (x) =>
+    x.attackClass === "policy-belief-divergence" && x.proof === "coverage-gap" && /cryptsetup|nvme|hdparm|mdadm/.test(x.payload);
+
+  it("fires on a hardline guard that gates dd/mkfs but clears cryptsetup/nvme/hdparm/mdadm erase", () => {
+    const r = runRedteam(ERASE_FIXTURE, ["vuln.py"], LOCAL);
+    assert.equal(r.verdict, "vulnerable");
+    const e = r.exploits.find(isEraseGap);
+    assert.ok(e, "expected a secure-erase coverage-gap exploit");
+    assert.match(e.sink, /detect_hardline_command/);
+    assert.match(e.payload, /cryptsetup|nvme|hdparm|mdadm/);
+  });
+
+  it("does NOT report a secure-erase gap on a guard that also gates the erase mechanisms", () => {
+    const dir = scratch({
+      "sound.py":
+        "def detect_hardline_command(command):\n" +
+        "  c = command.lower()\n" +
+        "  if 'dd ' in c and 'of=/dev/' in c: return True\n" +
+        "  if 'mkfs' in c and '/dev/' in c: return True\n" +
+        "  # also gates every whole-device erase mechanism (the action word is the signal)\n" +
+        "  erase = ['lukserase', 'luksformat', 'nvme format', 'nvme sanitize', '--security-erase', 'zero-superblock']\n" +
+        "  return any(n in c for n in erase)\n",
+    });
+    try {
+      const r = runRedteam(dir, ["sound.py"], LOCAL);
+      assert.equal(r.exploits.filter(isEraseGap).length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT flag benign inspection forms (cryptsetup status, nvme list) as a bypass", () => {
+    // The action word is the discriminator: a guard that gates the erase actions but clears the
+    // read-only inspection forms is correct — those aren't carriers, so no coverage gap is reported.
+    const dir = scratch({
+      "inspect.py":
+        "def detect_hardline_command(command):\n" +
+        "  c = command.lower()\n" +
+        "  if 'dd ' in c and 'of=/dev/' in c: return True\n" +
+        "  erase = ['lukserase', 'luksformat', 'nvme format', 'nvme sanitize', '--security-erase', 'zero-superblock']\n" +
+        "  return any(n in c for n in erase)  # gates erase; clears status/list/dump (not carriers)\n",
+    });
+    try {
+      const r = runRedteam(dir, ["inspect.py"], LOCAL);
+      assert.equal(r.exploits.filter(isEraseGap).length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 const SWIFT_FIXTURE = join(ROOT, "fixtures", "command-injection-swift");
 
 describe("raeuberkrebs command-injection gate (Swift lane)", () => {

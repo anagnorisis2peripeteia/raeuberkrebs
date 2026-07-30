@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { ATTACKERS } from "./runner.js";
+import { MAX_SOURCE_BYTES } from "./attackers/attacker.js";
 import type { AttackClass } from "./types.js";
 
 // The hunt's FREE deterministic pre-filter. Given a repo, it scans every source file for each
@@ -126,6 +127,7 @@ export function sweepRepo(repo: string, opts: { top?: number } = {}): SweepRepor
   for (const rel of files) {
     let src: string;
     try {
+      if (statSync(join(repo, rel)).size > MAX_SOURCE_BYTES) continue; // OOM guard on a huge file
       src = readFileSync(join(repo, rel), "utf8");
     } catch {
       continue;

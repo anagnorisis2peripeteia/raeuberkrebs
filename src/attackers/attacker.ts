@@ -1,25 +1,35 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import type { AttackClass, Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
 
+/** Skip source files larger than this. A lane's sink regex over a multi-megabyte generated blob buys
+ *  nothing, and an unbounded `readFileSync` of a huge/hostile file could OOM the whole scan — a real
+ *  risk in whole-repo hunt mode. */
+export const MAX_SOURCE_BYTES = 4 * 1024 * 1024;
+
 /**
  * Iterate the changed files a lane `handles`, yielding each with its source read. Encapsulates the
- * per-lane hunt preamble (handles-filter + `readFileSync` with skip-on-error) so a lane's `hunt()`
- * body starts straight at its sink logic instead of re-writing the same file loop. Files that fail to
- * read (deleted, unreadable) are skipped.
+ * per-lane hunt preamble (handles-filter + a bounded, contained `readFileSync` with skip-on-error) so
+ * a lane's `hunt()` body starts straight at its sink logic. Skips files that: escape the target dir
+ * (a crafted `../` / absolute entry must not read the host FS), exceed `MAX_SOURCE_BYTES`, or fail to
+ * read (deleted, unreadable, a directory).
  */
 export function* readHandledSources(
   targetDir: string,
   files: string[],
   handles: (file: string) => boolean,
 ): Generator<{ file: string; source: string }> {
+  const root = resolve(targetDir);
   for (const file of files) {
     if (!handles(file)) continue;
+    const abs = resolve(root, file);
+    if (abs !== root && !abs.startsWith(root + sep)) continue; // containment: no `../`/absolute escape
     let source: string;
     try {
-      source = readFileSync(join(targetDir, file), "utf8");
+      if (statSync(abs).size > MAX_SOURCE_BYTES) continue; // OOM guard
+      source = readFileSync(abs, "utf8");
     } catch {
       continue;
     }

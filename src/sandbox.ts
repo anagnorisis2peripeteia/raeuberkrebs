@@ -311,7 +311,9 @@ class LocalSandbox implements Sandbox {
     });
     return {
       stdout: r.stdout ?? "",
-      stderr: r.stderr ?? "",
+      // Surface spawn errors (notably an ENOBUFS `maxBuffer` overflow that silently truncates output —
+      // which could drop a proof marker and read as a false clean) instead of dropping them.
+      stderr: (r.stderr ?? "") + (r.error ? `\n[raeuberkrebs] exec error: ${r.error.message}` : ""),
       exitCode: r.status,
       timedOut: r.signal === "SIGTERM" && r.status === null,
     };
@@ -424,7 +426,9 @@ class CrabboxSandbox implements Sandbox {
     });
     return {
       stdout: r.stdout ?? "",
-      stderr: r.stderr ?? "",
+      // Surface spawn errors (notably an ENOBUFS `maxBuffer` overflow that silently truncates output —
+      // which could drop a proof marker and read as a false clean) instead of dropping them.
+      stderr: (r.stderr ?? "") + (r.error ? `\n[raeuberkrebs] exec error: ${r.error.message}` : ""),
       exitCode: r.status,
       timedOut: r.signal === "SIGTERM" && r.status === null,
     };

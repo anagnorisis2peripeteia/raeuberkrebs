@@ -19,12 +19,32 @@ function main(): number {
   }
 
   const dir = resolve(args.dir);
-  const changed = args.files ?? getChangedFilesFromGit(dir, args.base);
+
+  let changed: string[];
+  try {
+    changed = args.files ?? getChangedFilesFromGit(dir, args.base);
+  } catch (e) {
+    // A bad --base ref, a missing merge-base, or a non-git dir must fail closed with a clear message,
+    // not an uncaught stack trace (#70).
+    console.error(
+      `[raeuberkrebs] could not determine changed files (bad --base ref / no merge-base / not a git repo?): ` +
+        `${e instanceof Error ? e.message : String(e)}`,
+    );
+    return 1;
+  }
+
   const result = runRedteam(dir, changed, { sandbox: { prefer: args.prefer } });
 
   if (args.reportFile) {
-    writeFileSync(args.reportFile, JSON.stringify(result, null, 2));
-    console.error(`[raeuberkrebs] report written to ${args.reportFile}`);
+    try {
+      writeFileSync(args.reportFile, JSON.stringify(result, null, 2));
+      console.error(`[raeuberkrebs] report written to ${args.reportFile}`);
+    } catch (e) {
+      // A failed report write must not discard an otherwise-valid verdict.
+      console.error(
+        `[raeuberkrebs] could not write report to ${args.reportFile}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   }
   if (args.json) {
     process.stdout.write(JSON.stringify(result) + "\n");

@@ -1,11 +1,10 @@
-import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
-import { type Sandbox, ensurePythonEnv } from "../sandbox.js";
+import type { Sandbox } from "../sandbox.js";
 import { type Attacker, type StaticLead, PYTHON_SOURCE_RE } from "./attacker.js";
-import { PYTHON_SANDBOX_IMAGE, redactionModeDifferentialDriver, shq } from "./python-driver.js";
-import { buildConfigSecretBattery, scrubberFunctions, firstScrubberLine, scrubberLeads } from "./secrets-oracle.js";
+import { PYTHON_SANDBOX_IMAGE, redactionModeDifferentialDriver } from "./python-driver.js";
+import { buildConfigSecretBattery, scrubberLeads, scrubberDriveHunt } from "./secrets-oracle.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -31,6 +30,8 @@ const MODES = [
  * Redaction mode-differential drive-and-prove lane (Python scrubbers). Discovers a scrubber with a
  * context flag and drives the SAME config-secret across its modes; fires when the secret is redacted in
  * one mode but leaks in another — a self-oracling inconsistency needing no ground-truth list (CWE-200).
+ * The shared scrubber drive/discover loop lives in `scrubberDriveHunt`; this lane supplies its battery,
+ * driver (with MODES), marker, and exploit shape.
  */
 export class RedactionModeDifferentialPythonAttacker implements Attacker {
   readonly attackClass = "secret-exposure" as const;
@@ -46,40 +47,20 @@ export class RedactionModeDifferentialPythonAttacker implements Attacker {
   }
 
   hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
-    const exploits: Exploit[] = [];
-    const py = ensurePythonEnv(sandbox, targetDir);
-    const seen = new Set<string>();
-    for (const file of files) {
-      if (!this.handles(file)) continue;
-      let source: string;
-      try {
-        source = readFileSync(join(targetDir, file), "utf8");
-      } catch {
-        continue;
-      }
-      const names = scrubberFunctions(source);
-      if (names.length === 0) continue;
-      const scrubberLine = firstScrubberLine(source, new Set(names));
-
-      const inputs = buildConfigSecretBattery();
-      const driverRel = `.raeuber-modediff-${inputs[0]?.sentinel ?? "x"}.py`;
-      sandbox.writeFile(driverRel, redactionModeDifferentialDriver(file, names, inputs, MODES));
-      const out = sandbox.exec(`${py} ${shq(driverRel)} 2>&1`, 30_000);
-      const output = out.stdout + out.stderr;
-      for (const line of output.split("\n")) {
-        const m = line.match(/^RK_REDACT_MODEDIFF fn=(\S+) (.+)$/);
-        if (!m) continue;
-        const fnName = m[1];
-        let info: { label: string; leaked_in: string[]; redacted_in: string[] };
-        try {
-          info = JSON.parse(m[2] ?? "");
-        } catch {
-          continue;
-        }
-        const key = `${file}::${fnName}::${info.label}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        exploits.push({
+    return scrubberDriveHunt<{ label: string; leaked_in: string[]; redacted_in: string[] }>(
+      targetDir,
+      files,
+      sandbox,
+      {
+        marker: /^RK_REDACT_MODEDIFF fn=(\S+) (.+)$/,
+        buildDriver: (file, names) => {
+          const inputs = buildConfigSecretBattery();
+          return {
+            rel: `.raeuber-modediff-${inputs[0]?.sentinel ?? "x"}.py`,
+            body: redactionModeDifferentialDriver(file, names, inputs, MODES),
+          };
+        },
+        buildExploit: ({ fnName, info, file, scrubberLine, output }) => ({
           attackClass: "secret-exposure",
           proof: "redaction-mode-inconsistent",
           file,
@@ -95,9 +76,8 @@ export class RedactionModeDifferentialPythonAttacker implements Attacker {
             `Drove \`${fnName}()\` with the same ${info.label} secret across modes; its fresh sentinel ` +
             `survived in [${info.leaked_in.join(", ")}] but was redacted in [${info.redacted_in.join(", ")}]:\n` +
             output.slice(0, 400),
-        });
-      }
-    }
-    return exploits;
+        }),
+      },
+    );
   }
 }

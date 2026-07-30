@@ -1,6 +1,10 @@
 import { randomBytes } from "node:crypto";
-import type { StaticLead } from "./attacker.js";
-import type { SecretBatteryItem } from "./python-driver.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { Exploit } from "../types.js";
+import { type Sandbox, ensurePythonEnv } from "../sandbox.js";
+import { type StaticLead, PYTHON_SOURCE_RE } from "./attacker.js";
+import { type SecretBatteryItem, shq } from "./python-driver.js";
 
 // Shared machinery for the secret-redaction lanes (#89 completeness, #91 mode-differential). Both
 // discover a scrub/redact function and drive it with a battery of known secret formats, each carrying a
@@ -105,4 +109,64 @@ export function buildConfigSecretBattery(): SecretBatteryItem[] {
   items[2]!.secret = `{"password": "${items[2]!.sentinel}"}`;
   items[3]!.secret = `api_key = ${items[3]!.sentinel}`;
   return items;
+}
+
+export interface ScrubberDriveSpec<TInfo> {
+  /** Regex over each driver output line; capture group 1 = fnName, group 2 = JSON info. */
+  marker: RegExp;
+  /** Build the per-file driver: its sandbox-relative filename and body. */
+  buildDriver(file: string, names: string[]): { rel: string; body: string };
+  /** Turn one `marker`-matched leak line into an Exploit. */
+  buildExploit(ctx: { file: string; fnName: string; info: TInfo; scrubberLine: number; output: string }): Exploit;
+}
+
+/**
+ * Shared drive-and-prove loop for the Python scrubber lanes (redaction-completeness #89 and
+ * redaction-mode-differential #91). Sets up the Python env, iterates handled files, discovers scrubber
+ * functions, drives a lane-specific driver, and turns each `marker`-matched leak line into an Exploit
+ * via `buildExploit`. The lanes differ only in battery/driver, output marker, and exploit shape — the
+ * env setup, file iteration, scrubber discovery, and per-(file,fn,label) dedup live here once.
+ */
+export function scrubberDriveHunt<TInfo extends { label: string }>(
+  targetDir: string,
+  files: string[],
+  sandbox: Sandbox,
+  spec: ScrubberDriveSpec<TInfo>,
+): Exploit[] {
+  const exploits: Exploit[] = [];
+  const py = ensurePythonEnv(sandbox, targetDir);
+  const seen = new Set<string>();
+  for (const file of files) {
+    if (!PYTHON_SOURCE_RE.test(file)) continue;
+    let source: string;
+    try {
+      source = readFileSync(join(targetDir, file), "utf8");
+    } catch {
+      continue;
+    }
+    const names = scrubberFunctions(source);
+    if (names.length === 0) continue;
+    const scrubberLine = firstScrubberLine(source, new Set(names));
+
+    const { rel, body } = spec.buildDriver(file, names);
+    sandbox.writeFile(rel, body);
+    const out = sandbox.exec(`${py} ${shq(rel)} 2>&1`, 30_000);
+    const output = out.stdout + out.stderr;
+    for (const line of output.split("\n")) {
+      const m = line.match(spec.marker);
+      if (!m) continue;
+      const fnName = m[1] as string;
+      let info: TInfo;
+      try {
+        info = JSON.parse(m[2] ?? "") as TInfo;
+      } catch {
+        continue;
+      }
+      const key = `${file}::${fnName}::${info.label}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      exploits.push(spec.buildExploit({ file, fnName, info, scrubberLine, output }));
+    }
+  }
+  return exploits;
 }

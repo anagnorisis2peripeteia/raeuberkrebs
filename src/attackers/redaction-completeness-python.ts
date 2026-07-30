@@ -1,11 +1,10 @@
-import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
-import { type Sandbox, ensurePythonEnv } from "../sandbox.js";
+import type { Sandbox } from "../sandbox.js";
 import { type Attacker, type StaticLead, PYTHON_SOURCE_RE } from "./attacker.js";
-import { PYTHON_SANDBOX_IMAGE, redactionCompletenessDriver, shq } from "./python-driver.js";
-import { buildSecretBattery, scrubberFunctions, firstScrubberLine, scrubberLeads } from "./secrets-oracle.js";
+import { PYTHON_SANDBOX_IMAGE, redactionCompletenessDriver } from "./python-driver.js";
+import { buildSecretBattery, scrubberLeads, scrubberDriveHunt } from "./secrets-oracle.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -20,7 +19,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 /**
  * Redaction-completeness drive-and-prove lane (Python scrubbers). Discovers a `redact`/`scrub`/
  * `sanitize`/`mask` function and drives it with a secret battery; fires when a known secret format's
- * sentinel survives the scrubber (that format leaks in cleartext to the LLM / logs).
+ * sentinel survives the scrubber (that format leaks in cleartext to the LLM / logs). The shared
+ * scrubber drive/discover loop lives in `scrubberDriveHunt`; this lane supplies its battery, driver,
+ * leak marker, and exploit shape.
  */
 export class RedactionCompletenessPythonAttacker implements Attacker {
   readonly attackClass = "secret-exposure" as const;
@@ -36,57 +37,31 @@ export class RedactionCompletenessPythonAttacker implements Attacker {
   }
 
   hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
-    const exploits: Exploit[] = [];
-    const py = ensurePythonEnv(sandbox, targetDir);
-    const seen = new Set<string>();
-    for (const file of files) {
-      if (!this.handles(file)) continue;
-      let source: string;
-      try {
-        source = readFileSync(join(targetDir, file), "utf8");
-      } catch {
-        continue;
-      }
-      const names = scrubberFunctions(source);
-      if (names.length === 0) continue;
-      const scrubberLine = firstScrubberLine(source, new Set(names));
-
-      const battery = buildSecretBattery();
-      const driverRel = `.raeuber-redact-${battery[0]?.sentinel ?? "x"}.py`;
-      sandbox.writeFile(driverRel, redactionCompletenessDriver(file, names, battery));
-      const out = sandbox.exec(`${py} ${shq(driverRel)} 2>&1`, 30_000);
-      const output = out.stdout + out.stderr;
-      for (const line of output.split("\n")) {
-        const m = line.match(/^RK_REDACT_LEAK fn=(\S+) (.+)$/);
-        if (!m) continue;
-        const fnName = m[1];
-        let info: { label: string };
-        try {
-          info = JSON.parse(m[2] ?? "");
-        } catch {
-          continue;
-        }
-        const key = `${file}::${fnName}::${info.label}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        exploits.push({
-          attackClass: "secret-exposure",
-          proof: "secret-survived-redaction",
-          file,
-          line: scrubberLine,
-          sink: `scrubber:${fnName}()`,
-          summary:
-            `The scrubber \`${fnName}()\` redacts some secret formats but LEAKS the \`${info.label}\` ` +
-            `format — a battery secret of that type passed through with its unguessable sentinel intact, ` +
-            `so that secret reaches the LLM / logs in cleartext (incomplete redaction, CWE-200).`,
-          payload: `<${info.label} secret with embedded sentinel>`,
-          evidence:
-            `Drove \`${fnName}()\` with a battery of known secret formats; the \`${info.label}\` ` +
-            `format's fresh format-valid sentinel survived the scrubber (proof it was not redacted):\n` +
-            output.slice(0, 400),
-        });
-      }
-    }
-    return exploits;
+    return scrubberDriveHunt<{ label: string }>(targetDir, files, sandbox, {
+      marker: /^RK_REDACT_LEAK fn=(\S+) (.+)$/,
+      buildDriver: (file, names) => {
+        const battery = buildSecretBattery();
+        return {
+          rel: `.raeuber-redact-${battery[0]?.sentinel ?? "x"}.py`,
+          body: redactionCompletenessDriver(file, names, battery),
+        };
+      },
+      buildExploit: ({ fnName, info, file, scrubberLine, output }) => ({
+        attackClass: "secret-exposure",
+        proof: "secret-survived-redaction",
+        file,
+        line: scrubberLine,
+        sink: `scrubber:${fnName}()`,
+        summary:
+          `The scrubber \`${fnName}()\` redacts some secret formats but LEAKS the \`${info.label}\` ` +
+          `format — a battery secret of that type passed through with its unguessable sentinel intact, ` +
+          `so that secret reaches the LLM / logs in cleartext (incomplete redaction, CWE-200).`,
+        payload: `<${info.label} secret with embedded sentinel>`,
+        evidence:
+          `Drove \`${fnName}()\` with a battery of known secret formats; the \`${info.label}\` ` +
+          `format's fresh format-valid sentinel survived the scrubber (proof it was not redacted):\n` +
+          output.slice(0, 400),
+      }),
+    });
   }
 }

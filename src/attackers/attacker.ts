@@ -1,8 +1,31 @@
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AttackClass, Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
+
+/**
+ * Iterate the changed files a lane `handles`, yielding each with its source read. Encapsulates the
+ * per-lane hunt preamble (handles-filter + `readFileSync` with skip-on-error) so a lane's `hunt()`
+ * body starts straight at its sink logic instead of re-writing the same file loop. Files that fail to
+ * read (deleted, unreadable) are skipped.
+ */
+export function* readHandledSources(
+  targetDir: string,
+  files: string[],
+  handles: (file: string) => boolean,
+): Generator<{ file: string; source: string }> {
+  for (const file of files) {
+    if (!handles(file)) continue;
+    let source: string;
+    try {
+      source = readFileSync(join(targetDir, file), "utf8");
+    } catch {
+      continue;
+    }
+    yield { file, source };
+  }
+}
 
 /**
  * An attacker lane. Each lane knows one vulnerability class, ships a planted-vulnerable fixture its

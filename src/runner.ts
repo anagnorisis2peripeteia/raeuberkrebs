@@ -183,24 +183,30 @@ function sandboxOptionsFor(attacker: Attacker, base: SandboxOptions): SandboxOpt
  * (the family's "caught its own planted defect or it's dead" rule). Returns the sandbox identity
  * used, for the evidence trail.
  */
+// A canary may fail to fire once for a TRANSIENT reason — a cold CI runner where the first Python
+// venv build or a driver's node/subprocess startup overruns the exec timeout — not because the lane
+// is broken. Retry a not-live canary before quarantining: a genuinely dead lane fails every attempt
+// (still caught, fail-closed), but a one-off timeout passes on the retry, so the gate is deterministic
+// instead of intermittently red on `lane-dead`.
+const CANARY_ATTEMPTS = 2;
+
 function proveLaneLive(
   attacker: Attacker,
   box: Sandbox,
 ): { live: boolean; reason?: string; sandbox: string } {
-  try {
-    box.seedDir(attacker.canaryFixtureDir);
-    const files = handledFilesIn(attacker.canaryFixtureDir, attacker);
-    const fired = attacker.hunt(attacker.canaryFixtureDir, files, box);
-    return fired.length > 0
-      ? { live: true, sandbox: box.name }
-      : {
-          live: false,
-          reason: `${attacker.attackClass} canary did not fire against its planted fixture (${box.name})`,
-          sandbox: box.name,
-        };
-  } catch (err) {
-    return { live: false, reason: `canary errored: ${err instanceof Error ? err.message : err}`, sandbox: box.name };
+  let reason = `${attacker.attackClass} canary did not run`;
+  for (let attempt = 1; attempt <= CANARY_ATTEMPTS; attempt++) {
+    try {
+      box.seedDir(attacker.canaryFixtureDir);
+      const files = handledFilesIn(attacker.canaryFixtureDir, attacker);
+      const fired = attacker.hunt(attacker.canaryFixtureDir, files, box);
+      if (fired.length > 0) return { live: true, sandbox: box.name };
+      reason = `${attacker.attackClass} canary did not fire against its planted fixture (${box.name}) after ${attempt} attempt(s)`;
+    } catch (err) {
+      reason = `canary errored: ${err instanceof Error ? err.message : err}`;
+    }
   }
+  return { live: false, reason, sandbox: box.name };
 }
 
 export interface RunOptions {

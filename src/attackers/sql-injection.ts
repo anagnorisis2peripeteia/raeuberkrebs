@@ -13,6 +13,7 @@ import {
   freshMarker,
   nodeExportedNames,
   scanSinkLeads,
+  readHandledSources,
 } from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -88,14 +89,7 @@ export class SqlInjectionAttacker implements Attacker {
 
   hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
     const exploits: Exploit[] = [];
-    for (const file of files) {
-      if (!this.handles(file)) continue;
-      let source: string;
-      try {
-        source = readFileSync(join(targetDir, file), "utf8");
-      } catch {
-        continue;
-      }
+    for (const { file, source } of readHandledSources(targetDir, files, (f) => this.handles(f))) {
       if (!SQL_SINK_RE.test(source) || !QUERY_TAINT_RE.test(source)) continue;
 
       const names = nodeExportedNames(source);

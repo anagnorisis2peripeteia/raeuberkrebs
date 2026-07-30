@@ -13,6 +13,7 @@ import {
   freshMarker,
   nodeExportedNames,
   scanSinkLeads,
+  readHandledSources,
 } from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -79,14 +80,7 @@ export class PrototypePollutionAttacker implements Attacker {
 
   hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
     const exploits: Exploit[] = [];
-    for (const file of files) {
-      if (!this.handles(file)) continue;
-      let source: string;
-      try {
-        source = readFileSync(join(targetDir, file), "utf8");
-      } catch {
-        continue;
-      }
+    for (const { file, source } of readHandledSources(targetDir, files, (f) => this.handles(f))) {
       if (!MERGE_SINK_RE.test(source)) continue; // no recursive-merge/set sink here
       const names = nodeExportedNames(source);
       if (names.length === 0) continue;

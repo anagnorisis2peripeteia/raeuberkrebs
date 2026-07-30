@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import { type Sandbox, bundleForImport } from "../sandbox.js";
-import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames } from "./attacker.js";
+import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames, readHandledSources } from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -287,14 +287,7 @@ export class SsrfAttacker implements Attacker {
 
   hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
     const exploits: Exploit[] = [];
-    for (const file of files) {
-      if (!this.handles(file)) continue;
-      let source: string;
-      try {
-        source = readFileSync(join(targetDir, file), "utf8");
-      } catch {
-        continue;
-      }
+    for (const { file, source } of readHandledSources(targetDir, files, (f) => this.handles(f))) {
       if (!SINK_RE.test(source)) continue; // no outbound-request lead
       const names = nodeExportedNames(source);
       if (names.length === 0) continue; // reachable sink but no exported entrypoint to drive

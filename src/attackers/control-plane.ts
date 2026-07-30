@@ -13,6 +13,7 @@ import {
   freshMarker,
   nodeExportedNames,
   scanSinkLeads,
+  readHandledSources,
 } from "./attacker.js";
 import { functionUnits } from "./broken-access-control.js";
 
@@ -193,14 +194,7 @@ export class ControlPlaneAttacker implements Attacker {
 
   hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
     const exploits: Exploit[] = [];
-    for (const file of files) {
-      if (!this.handles(file)) continue;
-      let source: string;
-      try {
-        source = readFileSync(join(targetDir, file), "utf8");
-      } catch {
-        continue;
-      }
+    for (const { file, source } of readHandledSources(targetDir, files, (f) => this.handles(f))) {
       const exported = new Set(nodeExportedNames(source));
       const entries: Entry[] = functionUnits(source)
         .filter((u) => exported.has(u.name))

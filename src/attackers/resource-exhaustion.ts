@@ -12,6 +12,7 @@ import {
   NODE_SOURCE_RE,
   freshMarker,
   nodeExportedNames,
+  readHandledSources,
 } from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -199,14 +200,7 @@ export class ResourceExhaustionAttacker implements Attacker {
 
   hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
     const exploits: Exploit[] = [];
-    for (const file of files) {
-      if (!this.handles(file)) continue;
-      let source: string;
-      try {
-        source = readFileSync(join(targetDir, file), "utf8");
-      } catch {
-        continue;
-      }
+    for (const { file, source } of readHandledSources(targetDir, files, (f) => this.handles(f))) {
 
       const regexLeads = catastrophicRegexLeads(source);
       const jsonLeads = deepJsonLeads(source);

@@ -585,11 +585,15 @@ describe("raeuberkrebs normalization-differential (guard fail-open) — Python l
     });
     try {
       const r = runRedteam(dir, ["sound.py"], LOCAL);
-      assert.equal(
-        r.exploits.filter((x) => x.attackClass === "policy-belief-divergence" && /detector:/.test(x.sink)).length,
-        0,
-      );
-      assert.notEqual(r.verdict, "vulnerable");
+      // This guard soundly decodes ANSI-C quoting + brace expansion, so the normalization lane must
+      // not report a gap for ITS OWN carriers ($'…' / {a,b}). The guard IS still bypassable via
+      // shell variable indirection (`CMD=rm; $CMD -rf /`), which the assigned-variable lane
+      // legitimately flags — a different lane's real finding, not a normalization false positive.
+      const normGap = (x) =>
+        x.attackClass === "policy-belief-divergence" &&
+        x.proof === "coverage-gap" &&
+        /\$'|\{[^}]*,/.test(x.payload);
+      assert.equal(r.exploits.filter(normGap).length, 0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -640,11 +644,15 @@ describe("raeuberkrebs reverse-shell / C2 carrier coverage-differential (#94) �
     });
     try {
       const r = runRedteam(dir, ["sound.py"], LOCAL);
-      assert.equal(
-        r.exploits.filter((x) => x.attackClass === "policy-belief-divergence" && x.proof === "coverage-gap").length,
-        0,
-      );
-      assert.notEqual(r.verdict, "vulnerable");
+      // Guard gates every reverse-shell carrier, so the revshell lane must not report a gap for ITS
+      // carriers (/dev/tcp, nc -e, socat, mkfifo). The guard IS still bypassable via a pipe wrapper
+      // (`… | sudo sh`), which the pipe-wrapper lane legitimately flags — a different lane's real
+      // finding, not a revshell false positive.
+      const revshellGap = (x) =>
+        x.attackClass === "policy-belief-divergence" &&
+        x.proof === "coverage-gap" &&
+        /\/dev\/(?:tcp|udp)|\bnc -e|\bsocat|\bmkfifo|-e \/bin/.test(x.payload);
+      assert.equal(r.exploits.filter(revshellGap).length, 0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -758,10 +766,15 @@ describe("raeuberkrebs catastrophic-destruction carrier coverage-differential (#
     });
     try {
       const r = runRedteam(dir, ["sound.py"], LOCAL);
-      assert.equal(
-        r.exploits.filter((x) => x.attackClass === "policy-belief-divergence" && x.proof === "coverage-gap").length,
-        0,
-      );
+      // A dd/mkfs/shred guard also trips the sibling #99 secure-erase lane (cryptsetup/nvme/hdparm/
+      // mdadm), which is a different lane's legitimate finding. Isolate THIS (#98) lane's own
+      // device-destruction carriers, mirroring the #99 test's `isEraseGap` filtering.
+      const destructionGap = (x) =>
+        x.attackClass === "policy-belief-divergence" &&
+        x.proof === "coverage-gap" &&
+        /\b(?:dd|mkfs|shred|wipefs|blkdiscard|sgdisk|parted)\b/.test(x.payload) &&
+        !/cryptsetup|nvme|hdparm|mdadm/.test(x.payload);
+      assert.equal(r.exploits.filter(destructionGap).length, 0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1473,7 +1486,9 @@ describe("raeuberkrebs sql-injection gate (Node lane)", () => {
     const e = r.exploits.find((x) => x.attackClass === "sql-injection");
     assert.ok(e, "expected a sql-injection exploit");
     assert.equal(e.proof, "secret-exfiltrated");
-    assert.match(e.payload, /RAEUBER_/);
+    // The marker secret is exfiltrated into the sink OUTPUT (evidence); the payload field carries
+    // the boolean/UNION probe itself (e.g. `x' OR '1'='1`), so assert the marker in the evidence.
+    assert.match(e.evidence, /RAEUBER_/);
   });
 
   it("fires on NOVEL code — query string concatenation reaches execute", () => {
@@ -1701,14 +1716,22 @@ describe("raeuberkrebs path-traversal gate (filesystem boundary differential)", 
   it("does NOT fire for boundary-resolved reads without bypass payloads", () => {
     const dir = scratch({
       "guarded.js":
+        // A genuinely-sound boundary guard: it (1) confines reads to a dedicated subdirectory
+        // (`public/`), not the whole module dir, and (2) resolves symlinks via realpath BEFORE the
+        // boundary compare — so neither a `../` payload nor a planted symlink bridge escapes. A
+        // lexical resolve()+startsWith over the whole dir is symlink-bypassable, which the lane
+        // correctly flags; this negative control must actually be sound for "does NOT fire" to hold.
         'const fs = require("fs");\nconst path = require("path");\n' +
-        "const root = __dirname;\n" +
+        'const base = path.join(__dirname, "public");\n' +
         'function read(name) {\n' +
-        '  const safe = path.resolve(root, "allowed.txt");\n' +
+        '  fs.mkdirSync(base, { recursive: true });\n' +
+        '  const safe = path.join(base, "allowed.txt");\n' +
         '  if (!fs.existsSync(safe)) fs.writeFileSync(safe, "BOUNDARY_OK");\n' +
-        "  const target = path.resolve(root, name);\n" +
-        "  if (!target.startsWith(root + path.sep)) throw new Error('denied');\n" +
-        "  return fs.readFileSync(target, 'utf8');\n" +
+        "  const target = path.resolve(base, name);\n" +
+        "  const real = fs.existsSync(target) ? fs.realpathSync(target) : target;\n" +
+        "  const realBase = fs.realpathSync(base);\n" +
+        "  if (real !== realBase && !real.startsWith(realBase + path.sep)) throw new Error('denied');\n" +
+        "  return fs.readFileSync(real, 'utf8');\n" +
         "}\nmodule.exports.read = read;\n",
     });
     try {

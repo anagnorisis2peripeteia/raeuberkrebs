@@ -1,5 +1,7 @@
 # Räuberkrebs
 
+[![CI](https://github.com/anagnorisis2peripeteia/raeuberkrebs/actions/workflows/ci.yml/badge.svg)](https://github.com/anagnorisis2peripeteia/raeuberkrebs/actions/workflows/ci.yml)
+
 The **red-team** member of the krebs family (marmorkrebs=mutation, kanarienkrebs=runtime,
 einsiedlerkrebs=invariants, signalkrebs=concurrency). A PR-scoped **code-security** gate that
 *attacks* the entrypoints a change touched with adversarial payloads, **executes** them in a
@@ -29,24 +31,38 @@ Each lane first proves itself **live** by exploiting its planted-vulnerable fixt
 can't is quarantined (never a silent pass). PoCs run in a **crabbox** sandbox (throwaway, no network,
 no host FS); a reduced-isolation local copy is the fallback when crabbox isn't provisioned.
 
-## Status — Chunk 0 (built + verified)
+## Status
 
-- Lane: **command-injection** (Node `.js/.cjs`, Swift `.swift`, Python `.py`, Go `.go`), detect shell
-  sinks (`child_process`, `Process`, `subprocess shell=True`, `os.system`, `exec.Command("sh","-c",...)`)
-  → drive marker payloads through the exported/parsed entrypoint → prove via the executed marker.
-  Fires on the planted fixture + novel code; no false positive on safe non-shell exec paths.
-- Lane: **path-traversal** (Node `.js/.cjs`, Swift `.swift`, Python `.py`, Go `.go`), detect filesystem
-  joins/reads with untrusted components (`path.join`, `filepath.Join`, `String(contentsOfFile:)`,
-  `open(... )`) → prove via marker-secrets read outside base path.
-- Lane: **exec-authorization** (Node `.js/.cjs`), detect differential command launch policy where policy-facing
-  wrappers call a launcher that still accepts policy-unsafe equivalent argv forms (for example `node --eval`
-  bypassing `node -e`) → prove with benign argv differential payloads and marker execution.
-- Lane: **control-plane** (Node `.js/.cjs`), detect stateful policy-control escalation by driving low-privileged
-  config mutation first and then executing a marker-protected action only after that mutation succeeds.
-- Lane: **sql-injection** (Node `.js/.cjs`), broadened sink matching now includes `prepare(...).all/run/get/query()`
-  flows so prepared-query + dynamic-execution patterns on SQLite/driver-like APIs are exercised against planted
-  fixtures.
-- Primitives: the crabbox/local sandbox with a `writeFile` PoC-drop, git-diff scoping, the
-  fail-closed result model, canary-liveness in the runner, the CLI gate.
+**50 execute-the-PoC lanes** across Node/TypeScript, Python, Go, Swift, and C#/.NET. Every lane proves
+itself **live** against a planted-vulnerable fixture each run (the canary rule — a lane that can't
+exploit its own fixture is quarantined, never a silent pass). The full red-team suite runs on every
+push and PR (see the CI badge above).
 
-**Next (roadmap):** path-traversal static hardening is now live, plus the remaining C# static lanes (unsafe-exec, SQLi, weak-crypto, etc.) are shipping in follow-up chunks; current scope remains PR validation, live canary discipline, and discovery-tooling integration.
+Lane families:
+
+- **Injection** — command-injection (Node/Swift/Python/Go/.NET), SQL-injection (Node/Swift),
+  CSV/formula-injection (Node/Swift), unsafe-exec, eval-of-parsed-AST (`#107`), secondary-interpreter
+  (SSTI / log / CSV-formula / CRLF-header), prompt-injection (`#86`, static).
+- **Path / filesystem** — path-traversal (Node/Swift/Python/Go/.NET), name/identifier-field traversal
+  (`#102`), zip-slip, untrusted-search-path (`#101`).
+- **SSRF** — Node / Swift / .NET, with trust-boundary and check-vs-connect differentials.
+- **Authorization & access** — exec-authorization (argv-policy differential), control-plane (stateful
+  escalation), broken-access-control, broken-object-access, missing-authentication.
+- **Command-guard coverage differentials** (`policy-belief-divergence`, Python) — reverse-shell (`#94`),
+  defense-evasion (`#95`), catastrophic-destruction (`#98`), secure-erase (`#99`), pipe-wrapper
+  (`#100`), wrapper-completeness (`#96`), sensitive-path-spelling (`#92`), decode-eval (`#105`),
+  assignment-indirection (`#93`), guard-normalization. Each fires when a guard flags a control command
+  but clears an equivalent carrier the denylist misses (CWE-693 fail-open).
+- **Secret exposure** — redaction-completeness (`#89`), redaction mode-differential (`#91`).
+- **Deserialization & merge** — unsafe-deserialization (Node/Python/.NET), prototype-pollution.
+- **Other** — resource-exhaustion (Node/Swift), stored (second-order) taint, insecure-default (`#103`).
+
+Primitives: the crabbox/local sandbox with a `writeFile` PoC-drop, git-diff scoping, the fail-closed
+result model, canary-liveness in the runner, and the CLI gate.
+
+## Platform
+
+The full suite is verified on **macOS** (CI runs on `macos-latest`). The Node/Python/Go/.NET lanes run
+on Linux too, but the **Swift** lanes need a Swift toolchain — and stock-Linux Swift lacks the libcurl
+networking / SQLite backends the SSRF and SQLi Swift lanes drive, so full-suite parity is macOS-only
+for now. Lanes whose toolchain is absent skip or are quarantined rather than failing the gate.

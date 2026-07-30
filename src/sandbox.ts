@@ -308,20 +308,7 @@ class LocalSandbox implements Sandbox {
       // A deliberately spare env: no inherited secrets/tokens leak into an executed payload.
       env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: this.work, RAEUBER_SANDBOX: "local" },
       maxBuffer: 16 * 1024 * 1024,
-      // New process group (child leads its own group) so the WHOLE PoC tree can be reaped below, not
-      // just the direct `bash` child that spawnSync's timeout would SIGTERM.
-      detached: true,
     });
-    // spawnSync waited for the direct child, but a PoC that spawned a server / reverse shell can leave
-    // it running — re-parented to init after a timeout SIGTERM, or simply never closed on success.
-    // Reap the child's entire process group so no straggler (leaked port / process) survives the exec.
-    if (r.pid) {
-      try {
-        process.kill(-r.pid, "SIGKILL");
-      } catch {
-        // group already empty — nothing to reap
-      }
-    }
     return {
       stdout: r.stdout ?? "",
       // Surface spawn errors (notably an ENOBUFS `maxBuffer` overflow that silently truncates output —

@@ -7,8 +7,10 @@ import {
   type Attacker,
   type StaticLead,
   nodeRunCommand,
+  nodeDriverImport,
   NODE_SOURCE_RE,
   freshMarker,
+  nodeNotAFunctionGuard,
   nodeExportedNames,
   scanSinkLeads,
 } from "./attacker.js";
@@ -89,19 +91,10 @@ const logPayload = "line-start\\\\n" + MARKER;
 const headerPayload = "https://example.com/\\\\r\\\\nX-Injected: " + MARKER;
 const csvPayloads = ["=" + MARKER, "+" + MARKER, "-" + MARKER, "@" + MARKER];
 
-let m;
-try {
-  m = await import(modRel);
-} catch (e) {
-  process.stdout.write("IMPORT_FAIL:" + e);
-  process.exit(0);
-}
+${nodeDriverImport("modRel")}
 
 const target = (m && m[fnName]) || (m && m.default && (m.default[fnName] || m.default));
-if (typeof target !== "function") {
-  process.stdout.write("NOT_A_FUNCTION");
-  process.exit(0);
-}
+${nodeNotAFunctionGuard('typeof target !== "function"')}
 
 const logs = [];
 const headers = [];

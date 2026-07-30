@@ -6,6 +6,8 @@ import { type Sandbox, bundleForImport } from "../sandbox.js";
 import {
   type Attacker,
   type StaticLead,
+  nodeDriverImport,
+  nodeNotAFunctionGuard,
   nodeRunCommand,
   NODE_SOURCE_RE,
   freshMarker,
@@ -302,17 +304,16 @@ function bacDiffDriver(
   const S = JSON.stringify(strongName);
   const WS = JSON.stringify(weakScopes);
   const MK = JSON.stringify(marker);
-  return `
+return `
 const MARKER = ${MK};
-let m;
-try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }
+${nodeDriverImport(mod)}
 function pick(name){
   if (m && typeof m[name] === "function") return m[name];
   if (m && m.default && typeof m.default[name] === "function") return m.default[name];
   return null;
 }
 const weak = pick(${W}), strong = pick(${S});
-if (!weak || !strong) { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
+${nodeNotAFunctionGuard("!weak || !strong")}
 const PAY = { model: MARKER, value: MARKER, setting: MARKER, name: MARKER, label: MARKER, level: MARKER, thinkingLevel: MARKER, config: MARKER, data: MARKER, key: MARKER, id: MARKER };
 function ctxShapes(scopes){
   const s = Array.isArray(scopes) ? scopes : (scopes ? [scopes] : []);

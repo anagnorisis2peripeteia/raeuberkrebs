@@ -3,7 +3,17 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames, scanSinkLeads } from "./attacker.js";
+import {
+  type Attacker,
+  type StaticLead,
+  nodeDriverImport,
+  nodeNotAFunctionGuard,
+  nodeRunCommand,
+  NODE_SOURCE_RE,
+  freshMarker,
+  nodeExportedNames,
+  scanSinkLeads,
+} from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -40,11 +50,10 @@ function zipSlipDriver(moduleRel: string, fnName: string, marker: string): strin
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 const MK = ${MK};
-let m;
-try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }
+${nodeDriverImport(mod)}
 function pick(n){ if (m && typeof m[n]==="function") return m[n]; if (m && m.default && typeof m.default[n]==="function") return m.default[n]; return null; }
 const fn = pick(${F});
-if (!fn) { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
+${nodeNotAFunctionGuard("!fn")}
 const dest = resolve(process.cwd(), "rk-extract-" + MK);      // the intended extraction dir
 const outside = resolve(process.cwd(), "ZS_" + MK);           // parent of dest — an entry must NOT reach here
 const esc = "../ZS_" + MK;                                    // relative to dest -> outside

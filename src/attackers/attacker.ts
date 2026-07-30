@@ -82,6 +82,27 @@ export const GO_SOURCE_RE = /\.go$/;
 export const NODE_RUN = "node --no-warnings --experimental-transform-types";
 
 /**
+ * Shared Node import preamble.
+ *
+ * Emits the exact failure marker expected by the existing Node drivers:
+ * `IMPORT_FAIL:` plus the thrown import error, then exits without changing exit code.
+ */
+export function nodeDriverImport(modExpr: string): string {
+  return `let m;
+try { m = await import(${modExpr}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }`;
+}
+
+/**
+ * Shared Node guard that emits `NOT_A_FUNCTION` for an arbitrary function-shape predicate.
+ *
+ * `condExpr` is inlined as-is inside the runtime guard condition so this can be reused for
+ * single-name and multi-name checks without altering behavior.
+ */
+export function nodeNotAFunctionGuard(condExpr: string): string {
+  return `if (${condExpr}) { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }`;
+}
+
+/**
  * Pick the best command for the target project.
  *
  * For monorepos with tsconfig path-aliases, `node --experimental-transform-types` often fails while
@@ -108,10 +129,9 @@ export function nodeImportDriver(moduleRel: string, fnName: string, arg: string)
   const mod = JSON.stringify("./" + moduleRel);
   const fn = JSON.stringify(fnName);
   return `
-let m;
-try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }
+${nodeDriverImport(mod)}
 const fn = (m && m[${fn}]) || (m && m.default && (m.default[${fn}] || m.default));
-if (typeof fn !== "function") { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
+${nodeNotAFunctionGuard(`typeof fn !== "function"`)}
 try {
   const r = await fn(${a});
   process.stdout.write(String(r && r.stdout ? r.stdout : (r == null ? "" : r)));

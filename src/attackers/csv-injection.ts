@@ -3,7 +3,17 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames, scanSinkLeads } from "./attacker.js";
+import {
+  type Attacker,
+  type StaticLead,
+  nodeDriverImport,
+  nodeNotAFunctionGuard,
+  nodeRunCommand,
+  NODE_SOURCE_RE,
+  freshMarker,
+  nodeExportedNames,
+  scanSinkLeads,
+} from "./attacker.js";
 import { functionUnits } from "./broken-access-control.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -32,17 +42,16 @@ function firstSinkLine(source: string): number {
  * `\t`, not `= + - @`, so it does NOT fire — no false positive on a correctly-escaped serializer.
  */
 function csvProbeDriver(moduleRel: string, fnName: string, marker: string): string {
-  const mod = JSON.stringify("./" + moduleRel);
+const mod = JSON.stringify("./" + moduleRel);
   const fn = JSON.stringify(fnName);
   const mk = JSON.stringify(marker);
   return `
 const MARKER = ${mk};
 const F = "=" + MARKER;              // the benign formula payload
 const inputs = [ [[F]], [{ a: F, b: F, c: F }], [F], { a: F, b: F }, F ];
-let m;
-try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }
+${nodeDriverImport(mod)}
 const fn = (m && m[${fn}]) || (m && m.default && (m.default[${fn}] || m.default));
-if (typeof fn !== "function") { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
+${nodeNotAFunctionGuard('typeof fn !== "function"')}
 let fired = null;
 
 function csvCells(line) {

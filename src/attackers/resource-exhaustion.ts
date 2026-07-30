@@ -3,7 +3,16 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames } from "./attacker.js";
+import {
+  type Attacker,
+  type StaticLead,
+  nodeDriverImport,
+  nodeNotAFunctionGuard,
+  nodeRunCommand,
+  NODE_SOURCE_RE,
+  freshMarker,
+  nodeExportedNames,
+} from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -63,18 +72,17 @@ function redosDriver(moduleRel: string, fnName: string, marker: string): string 
   const mod = JSON.stringify("./" + moduleRel);
   const F = JSON.stringify(fnName);
   const MK = JSON.stringify(marker);
-  return `
+return `
 const SAMPLE_COUNT = 4;
 const MARKER = ${MK};
 const ABS_THRESHOLD_MS = 400;
 const BASELINE_THRESHOLD_MS = 250;
 const BASELINE_FACTOR = 6;
 const SLOPE_MARGIN_MS = 250;
-let m;
-try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }
+${nodeDriverImport(mod)}
 function pick(n){ if (m && typeof m[n]==="function") return m[n]; if (m && m.default && typeof m.default[n]==="function") return m.default[n]; return null; }
 const fn = pick(${F});
-if (!fn) { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
+${nodeNotAFunctionGuard("!fn")}
 function shapes(v){ return [ [v], [{ input: v, text: v, value: v, query: v, name: v, pattern: v, content: v, url: v }], [v, v] ]; }
 async function callAll(v){ for (const a of shapes(v)){ try { await fn(...a); } catch(e){} } }
 async function sample(v){
@@ -129,15 +137,14 @@ function deepJsonDriver(moduleRel: string, fnName: string, marker: string): stri
   const mod = JSON.stringify("./" + moduleRel);
   const F = JSON.stringify(fnName);
   const MK = JSON.stringify(marker);
-  return `
+return `
 const MARKER = ${MK};
 const THRESHOLD_MS = 400;
 const DEPTHS = [120, 240, 480, 960, 1920];
-let m;
-try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }
+${nodeDriverImport(mod)}
 function pick(n){ if (m && typeof m[n]==="function") return m[n]; if (m && m.default && typeof m.default[n]==="function") return m.default[n]; return null; }
 const fn = pick(${F});
-if (!fn) { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
+${nodeNotAFunctionGuard("!fn")}
 
 function deepArray(level){
   let payload = '"a"';

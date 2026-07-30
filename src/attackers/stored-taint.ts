@@ -3,7 +3,16 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames } from "./attacker.js";
+import {
+  type Attacker,
+  type StaticLead,
+  nodeDriverImport,
+  nodeNotAFunctionGuard,
+  nodeRunCommand,
+  NODE_SOURCE_RE,
+  freshMarker,
+  nodeExportedNames,
+} from "./attacker.js";
 import { functionUnits } from "./broken-access-control.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -52,15 +61,14 @@ function storedTaintDriver(moduleRel: string, writerName: string, readerName: st
   const MK = JSON.stringify(marker);
   return `
 const MARKER = ${MK};
-let m;
-try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }
+${nodeDriverImport(mod)}
 function pick(n){
   if (m && typeof m[n]==="function") return m[n];
   if (m && m.default && typeof m.default[n]==="function") return m.default[n];
   return null;
 }
 const writer = pick(${W}), reader = pick(${R});
-if (!writer || !reader) { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
+${nodeNotAFunctionGuard("!writer || !reader")}
 
   const MARKER_KEY = "rk-key-" + Math.random().toString(16).slice(2);
   const payload = { key: MARKER_KEY, id: MARKER_KEY, data: MARKER, body: MARKER, text: MARKER, value: MARKER };

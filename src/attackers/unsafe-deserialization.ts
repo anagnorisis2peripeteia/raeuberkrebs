@@ -6,6 +6,8 @@ import type { Sandbox } from "../sandbox.js";
 import {
   type Attacker,
   type StaticLead,
+  nodeDriverImport,
+  nodeNotAFunctionGuard,
   nodeRunCommand,
   NODE_SOURCE_RE,
   freshMarker,
@@ -108,13 +110,7 @@ const NODE_PAYLOAD = ${JSON.stringify(nodePayload)};
 const YAML_PAYLOAD = ${JSON.stringify(yamlPayload)};
 const REVOKE_PAYLOAD = ${JSON.stringify(reviverPayload)};
 
-let m;
-try {
-  m = await import(MOD);
-} catch (e) {
-  process.stdout.write("IMPORT_FAIL:" + e);
-  process.exit(0);
-}
+${nodeDriverImport("MOD")}
 
 function pick(name) {
   if (m && typeof m[name] === "function") return m[name];
@@ -123,10 +119,7 @@ function pick(name) {
 }
 
 const fn = pick(FN);
-if (!fn) {
-  process.stdout.write("NOT_A_FUNCTION");
-  process.exit(0);
-}
+${nodeNotAFunctionGuard("!fn")}
 
 async function callWithPayload(payload) {
   try {

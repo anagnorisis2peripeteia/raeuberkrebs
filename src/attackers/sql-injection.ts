@@ -6,6 +6,8 @@ import type { Sandbox } from "../sandbox.js";
 import {
   type Attacker,
   type StaticLead,
+  nodeDriverImport,
+  nodeNotAFunctionGuard,
   nodeRunCommand,
   NODE_SOURCE_RE,
   freshMarker,
@@ -44,18 +46,17 @@ function firstSinkLine(source: string): number {
 }
 
 function sqlDriver(moduleRel: string, fnName: string, marker: string): string {
-  const mod = JSON.stringify("./" + moduleRel);
+const mod = JSON.stringify("./" + moduleRel);
   const F = JSON.stringify(fnName);
   const MK = JSON.stringify(marker);
   const benign = JSON.stringify(`ZZ_${marker}_none`);
   const payloadLines = payloads(marker).map((p) => JSON.stringify(p)).join(", ");
   return `
 const BENIGN = ${benign};
-let m;
-try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }
+${nodeDriverImport(mod)}
 function pick(n){ return m && typeof m[n] === "function" ? m[n] : (m && m.default && typeof m.default[n] === "function" ? m.default[n] : null); }
 const fn = pick(${F});
-if (!fn) { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
+${nodeNotAFunctionGuard("!fn")}
 const payloads = [${payloadLines}];
 async function call(v){
   try { return String(await Promise.resolve(fn(v)) || ""); } catch (e) { return String((e && e.message) || e || ""); }

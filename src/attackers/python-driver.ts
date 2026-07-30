@@ -85,6 +85,35 @@ def _load_target(rel):
 `.trim();
 
 /**
+ * Shared Python import preamble.
+ *
+ * Emits the exact success/failure path used across Python drivers: import the target module using
+ * `_load_target`, and print the canonical `IMPORT_FAIL:` marker on failure before exiting.
+ */
+export function pythonDriverImport(targetExpr: string): string {
+  return `
+try:
+  mod = _load_target(${targetExpr})
+except Exception as e:
+  print("IMPORT_FAIL:" + repr(e))
+  raise SystemExit(0)
+`.trim();
+}
+
+/**
+ * Shared Python function-shape guard.
+ *
+ * Emits the canonical `NOT_A_FUNCTION` marker for any already-resolved callable expression.
+ */
+export function pythonDriverNotAFunction(functionExpr: string): string {
+  return `
+if not callable(${functionExpr}):
+  print("NOT_A_FUNCTION")
+  raise SystemExit(0)
+`.trim();
+}
+
+/**
  * Driver for the injection lanes (command-injection, path-traversal): decode the base64 payload from
  * RAEUBER_PAYLOAD_B64, import the target WITH package context, resolve `fnName`, call `fn(payload)`.
  * Prints IMPORT_FAIL / NOT_A_FUNCTION on the honest failure paths. CalledProcessError output is
@@ -104,16 +133,10 @@ except Exception as e:
   print("BASE64_FAIL:" + str(e))
   raise SystemExit(0)
 
-try:
-  mod = _load_target(${target})
-except Exception as e:
-  print("IMPORT_FAIL:" + repr(e))
-  raise SystemExit(0)
+${pythonDriverImport(target)}
 
 fn = getattr(mod, ${fn}, None)
-if not callable(fn):
-  print("NOT_A_FUNCTION")
-  raise SystemExit(0)
+${pythonDriverNotAFunction("fn")}
 
 try:
   r = fn(payload)
@@ -159,16 +182,9 @@ MARKER = ${mk}
 SENTINEL = os.path.abspath(".rk-deser-fired-" + MARKER)
 MODES = ${modeList}
 
-try:
-  mod = _load_target(${target})
-except Exception as e:
-  print("IMPORT_FAIL:" + repr(e))
-  raise SystemExit(0)
-
+${pythonDriverImport(target)}
 fn = getattr(mod, ${fn}, None)
-if not callable(fn):
-  print("NOT_A_FUNCTION")
-  raise SystemExit(0)
+${pythonDriverNotAFunction("fn")}
 
 
 class _PickleGadget:
@@ -237,11 +253,7 @@ MARKER = ${mk}
 CORPUS = ${corpusJson}
 FNS = ${fns}
 
-try:
-  mod = _load_target(${target})
-except Exception as e:
-  print("IMPORT_FAIL:" + repr(e))
-  raise SystemExit(0)
+${pythonDriverImport(target)}
 
 
 def _ground_truth_fired(cmd):
@@ -312,11 +324,7 @@ ${PYTHON_LOAD_TARGET_SRC}
 DETECTORS = ${detectors}
 CORPUS = ${corpusJson}
 
-try:
-  mod = _load_target(${target})
-except Exception as e:
-  print("IMPORT_FAIL:" + repr(e))
-  raise SystemExit(0)
+${pythonDriverImport(target)}
 
 
 def _flagged(r):
@@ -387,11 +395,7 @@ MARKER = ${mk}
 DETECTORS = ${detectors}
 CORPUS = ${corpusJson}
 
-try:
-  mod = _load_target(${target})
-except Exception as e:
-  print("IMPORT_FAIL:" + repr(e))
-  raise SystemExit(0)
+${pythonDriverImport(target)}
 
 
 def _flagged(r):
@@ -462,11 +466,7 @@ ${PYTHON_LOAD_TARGET_SRC}
 FNS = ${fns}
 BATTERY = ${batteryJson}
 
-try:
-  mod = _load_target(${target})
-except Exception as e:
-  print("IMPORT_FAIL:" + repr(e))
-  raise SystemExit(0)
+${pythonDriverImport(target)}
 
 
 def _scrub(fn, secret):
@@ -526,11 +526,7 @@ FNS = ${fns}
 INPUTS = ${inputsJson}
 MODES = json.loads(${modesLiteral})
 
-try:
-  mod = _load_target(${target})
-except Exception as e:
-  print("IMPORT_FAIL:" + repr(e))
-  raise SystemExit(0)
+${pythonDriverImport(target)}
 
 
 def _scrub(fn, secret, kwargs):
@@ -598,11 +594,7 @@ MARKER = ${mk}
 DETECTORS = ${detectors}
 CORPUS = ${corpusJson}
 
-try:
-  mod = _load_target(${target})
-except Exception as e:
-  print("IMPORT_FAIL:" + repr(e))
-  raise SystemExit(0)
+${pythonDriverImport(target)}
 
 
 def _flagged(r):

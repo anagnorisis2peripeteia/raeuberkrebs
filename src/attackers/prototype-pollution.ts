@@ -3,7 +3,17 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import { type Sandbox, bundleForImport } from "../sandbox.js";
-import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames, scanSinkLeads } from "./attacker.js";
+import {
+  type Attacker,
+  type StaticLead,
+  nodeDriverImport,
+  nodeNotAFunctionGuard,
+  nodeRunCommand,
+  NODE_SOURCE_RE,
+  freshMarker,
+  nodeExportedNames,
+  scanSinkLeads,
+} from "./attacker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -30,11 +40,10 @@ function pollutionDriver(moduleRel: string, fnName: string, marker: string): str
   const MK = JSON.stringify(marker);
   return `
 const MK = ${MK};
-let m;
-try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }
+${nodeDriverImport(mod)}
 function pick(n){ if (m && typeof m[n]==="function") return m[n]; if (m && m.default && typeof m.default[n]==="function") return m.default[n]; return null; }
 const fn = pick(${F});
-if (!fn) { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
+${nodeNotAFunctionGuard("!fn")}
 function clean(){ try { delete Object.prototype[MK]; delete Object.prototype["polluted_"+MK]; } catch(e){} }
 function polluted(){ return ({})[MK] === MK || ({})["polluted_"+MK] === MK; }
 // payloads: __proto__ and constructor.prototype vectors as OWN keys (JSON.parse keeps __proto__ as own key)

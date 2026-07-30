@@ -6,6 +6,8 @@ import type { Sandbox } from "../sandbox.js";
 import {
   type Attacker,
   type StaticLead,
+  nodeDriverImport,
+  nodeNotAFunctionGuard,
   nodeRunCommand,
   NODE_SOURCE_RE,
   freshMarker,
@@ -128,8 +130,7 @@ function execAuthorizationDriver(moduleRel: string, launcherName: string, marker
   return `
 const MARKER = ${MK};
 const CASES = ${CASES};
-let m;
-try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }
+${nodeDriverImport(mod)}
 
 function pick(name) {
   if (m && typeof m[name] === "function") return m[name];
@@ -138,10 +139,7 @@ function pick(name) {
 }
 
 const launcher = pick(${fn});
-if (!launcher) {
-  process.stdout.write("NOT_A_FUNCTION");
-  process.exit(0);
-}
+${nodeNotAFunctionGuard("!launcher")}
 
 function asText(v) {
   if (v == null) return "";

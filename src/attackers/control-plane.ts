@@ -6,6 +6,8 @@ import type { Sandbox } from "../sandbox.js";
 import {
   type Attacker,
   type StaticLead,
+  nodeDriverImport,
+  nodeNotAFunctionGuard,
   nodeRunCommand,
   NODE_SOURCE_RE,
   freshMarker,
@@ -59,15 +61,14 @@ function controlPlaneDriver(moduleRel: string, mutatorName: string, actionName: 
 
   return `
 const MARKER = ${MK};
-let m;
-try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }
+${nodeDriverImport(mod)}
 function pick(n){
   if (m && typeof m[n] === "function") return m[n];
   if (m && m.default && typeof m.default[n] === "function") return m.default[n];
   return null;
 }
 const mut = pick(${M}), act = pick(${A});
-if (!mut || !act) { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
+${nodeNotAFunctionGuard("!mut || !act")}
 
 function asText(v) {
   if (v == null) return "";

@@ -3,7 +3,17 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames, scanSinkLeads } from "./attacker.js";
+import {
+  type Attacker,
+  type StaticLead,
+  nodeDriverImport,
+  nodeNotAFunctionGuard,
+  nodeRunCommand,
+  NODE_SOURCE_RE,
+  freshMarker,
+  nodeExportedNames,
+  scanSinkLeads,
+} from "./attacker.js";
 import { functionUnits } from "./broken-access-control.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -48,11 +58,10 @@ function idorDiffDriver(moduleRel: string, createName: string, readName: string,
   const MK = JSON.stringify(marker);
   return `
 const MARKER = ${MK};
-let m;
-try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }
+${nodeDriverImport(mod)}
 function pick(n){ if (m && typeof m[n]==="function") return m[n]; if (m && m.default && typeof m.default[n]==="function") return m.default[n]; return null; }
 const create = pick(${C}), read = pick(${R});
-if (!create || !read) { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
+${nodeNotAFunctionGuard("!create || !read")}
 function idsAll(v, out){ if (v==null) return; if (typeof v==="string"){ out.push(v); return; } if (typeof v==="object"){ for (const k of Object.keys(v)){ if (/^(id|key|sessionId|sessionKey|docId|resourceId|name|_id)$/i.test(k) && (typeof v[k]==="string"||typeof v[k]==="number")) out.push(String(v[k])); idsAll(v[k], out); } } }
 function ctxs(identity){ const s=["read","write"]; return [ {identity, scopes:s}, {agentId:identity, scopes:s}, {userId:identity, scopes:s}, {caller:{id:identity}, scopes:s}, {user:{id:identity}, scopes:s}, {identity} ]; }
 const BODY = { body: MARKER, content: MARKER, text: MARKER, value: MARKER, data: MARKER, name: MARKER, message: MARKER };

@@ -20,7 +20,7 @@ const READ_NAME_RE = /^(?:get|read|fetch|load|lookup|select|describe|show|view|o
 // Body heuristics for storage sinks/sources.
 const WRITE_BODY_RE =
   /\[[^\]]+\]\s*=|\.set(?:Item)?\s*\(|\.push\s*\(|\.(?:save|store|persist|upsert|insert|write|add|set)\s*\(|\bMap\.prototype\.set\s*\(/i;
-const READ_BODY_RE = /\[[^\]]+\]|\.get(?:Item)?\s*\(|\.(?:load|read|fetch|find|select)\s*\(/i;
+const READ_BODY_RE = /\b[A-Za-z_$][\w$]*\s*\[[^\]]+\]|\.get(?:Item)?\s*\(|\.(?:load|read|fetch|find|select)\s*\(/i;
 
 const WRITE_SINK_RE = /(?:\[[^\]]+\]\s*=|\.set(?:Item)?\s*\(|\.(?:save|store|persist|upsert|insert|write|add|set)\s*\()/i;
 const READ_SINK_RE = /(?:\[[^\]]+\]|\.get(?:Item)?\s*\(|\.(?:load|read|fetch|find|select|open|resolve|lookup)\s*\()/i;
@@ -62,20 +62,21 @@ function pick(n){
 const writer = pick(${W}), reader = pick(${R});
 if (!writer || !reader) { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
 
-const MARKER_KEY = "record-" + MARKER;
-const payload = { key: MARKER_KEY, id: MARKER_KEY, data: MARKER, body: MARKER, text: MARKER, value: MARKER };
-const contexts = [
-  { identity: "writer-" + MARKER, userId: "writer-" + MARKER, scopes: ["write"] },
-  { actor: "writer-" + MARKER },
-  { user: { id: "writer-" + MARKER } },
-  { ctx: "writer-" + MARKER },
-  {},
-];
+  const MARKER_KEY = "rk-key-" + Math.random().toString(16).slice(2);
+  const payload = { key: MARKER_KEY, id: MARKER_KEY, data: MARKER, body: MARKER, text: MARKER, value: MARKER };
+  const runId = "run-" + Math.random().toString(16).slice(2);
+  const contexts = [
+    { identity: runId, userId: runId, scopes: ["write"] },
+    { actor: "writer-" + runId },
+    { user: { id: runId } },
+    { ctx: runId },
+    {},
+  ];
 
 function collectIds(v, out){
   if (v == null) return;
   if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-    out.push(String(v));
+    out.add(String(v));
     return;
   }
   if (Array.isArray(v)) {
@@ -84,10 +85,10 @@ function collectIds(v, out){
   }
   if (typeof v !== "object") return;
   for (const key of Object.keys(v)) {
-    if (typeof key === "string") out.push(key);
+    if (typeof key === "string") out.add(String(key));
     const val = v[key];
     if (typeof val === "object" || Array.isArray(val)) collectIds(val, out);
-    else if (typeof key !== "undefined" && /^(id|key|sessionId|recordId|recordKey|_id|uuid|name)$/i.test(key)) out.push(val);
+    else if (typeof key !== "undefined" && /^(id|key|sessionId|recordId|recordKey|_id|uuid|name)$/i.test(key)) out.add(String(val));
   }
 }
 
@@ -108,7 +109,7 @@ async function call(fn, args){
   try { return { ok: true, ret: await fn(...args) }; } catch { return { ok: false, ret: null }; }
 }
 
-const writeIds = [];
+const writeIds = new Set([payload.key, payload.id]);
 const writeShapes = [
   [payload],
   [contexts[0], payload],
@@ -122,13 +123,12 @@ for (const args of writeShapes){
   if (!r.ok) continue;
   const wrote = r.ret;
   collectIds(wrote, writeIds);
-  if (hasMarker(wrote)) writeIds.push(MARKER_KEY);
 }
-collectIds(payload.key, writeIds);
-collectIds(payload.id, writeIds);
-if (hasMarker(payload.value)) writeIds.push(MARKER_KEY);
 
-const keyCandidates = [...new Set(writeIds.map((v) => String(v).trim()).filter(Boolean))];
+const keyCandidates = [...writeIds]
+  .map((v) => String(v).trim())
+  .filter(Boolean)
+  .filter((v) => v.includes(MARKER) === false);
 
 const readShapes = (id) => [
   [id],

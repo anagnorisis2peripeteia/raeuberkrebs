@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
 import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames, scanSinkLeads } from "./attacker.js";
+import { functionUnits } from "./broken-access-control.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -37,19 +38,44 @@ function csvProbeDriver(moduleRel: string, fnName: string, marker: string): stri
   return `
 const MARKER = ${mk};
 const F = "=" + MARKER;              // the benign formula payload
-const inputs = [ [[F, F]], [{ a: F, b: F, c: F }], [F], { a: F, b: F }, F ];
+const inputs = [ [[F]], [{ a: F, b: F, c: F }], [F], { a: F, b: F }, F ];
 let m;
 try { m = await import(${mod}); } catch (e) { process.stdout.write("IMPORT_FAIL:" + e); process.exit(0); }
 const fn = (m && m[${fn}]) || (m && m.default && (m.default[${fn}] || m.default));
 if (typeof fn !== "function") { process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
 let fired = null;
+
+function csvCells(line) {
+  const out = [];
+  let cell = "";
+  let quote = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      if (quote && line[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else {
+        quote = !quote;
+      }
+    } else if (c === "," && !quote) {
+      out.push(cell);
+      cell = "";
+    } else {
+      cell += c;
+    }
+  }
+  out.push(cell);
+  return out;
+}
+
 for (const input of inputs) {
   let out;
   try { out = await fn(input); } catch (e) { continue; }
   const s = typeof out === "string" ? out : (out && out.stdout ? String(out.stdout) : String(out == null ? "" : out));
   for (const line of s.split(/\\r?\\n/)) {
-    for (let cell of line.split(",")) {
-      cell = cell.replace(/^"|"$/g, "");                  // strip RFC-4180 quoting to see the real first char
+    for (let cell of csvCells(line)) {
+      cell = String(cell).replace(/^"|"$/g, "");                  // strip RFC-4180 quoting to see the real first char
       if (/^[=+@\\-]/.test(cell) && cell.indexOf(MARKER) !== -1) { fired = cell.slice(0, 90); break; }
     }
     if (fired) break;
@@ -83,7 +109,11 @@ export class CsvInjectionAttacker implements Attacker {
         continue;
       }
       if (!SINK_RE.test(source)) continue; // no CSV-serialization lead
-      const names = nodeExportedNames(source);
+      const exported = new Set(nodeExportedNames(source));
+      const names = functionUnits(source)
+        .filter((entry) => exported.has(entry.name))
+        .filter((entry) => SINK_RE.test(entry.body))
+        .map((entry) => entry.name);
       if (names.length === 0) continue;
       const sinkLine = firstSinkLine(source);
       const sink = (source.match(SINK_RE)?.[0] ?? "csv-serialize").trim().slice(0, 24);

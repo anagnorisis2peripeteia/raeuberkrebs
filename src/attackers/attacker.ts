@@ -125,11 +125,29 @@ try {
 export function nodeExportedNames(source: string): string[] {
   const re =
     /export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)|(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=|export\s+const\s+([A-Za-z_$][\w$]*)\s*=/g;
+  const listRe = /export\s+\{([^}]+)\}/g;
   const objectRe = /(?:module\.exports|exports)\s*=\s*\{([\s\S]*?)\}/g;
   const names = new Set<string>();
   for (const m of source.matchAll(re)) {
     const name = m[1] || m[2] || m[3];
     if (name) names.add(name);
+  }
+  for (const m of source.matchAll(listRe)) {
+    const list = m[1] ?? "";
+    for (const raw of list.split(",")) {
+      const trimmed = raw.trim();
+      if (!trimmed || trimmed === "...") continue;
+
+      const asMatch = trimmed.match(
+        /^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/i,
+      );
+      if (asMatch) {
+        names.add(asMatch[2] ?? "");
+        continue;
+      }
+
+      if (/^[A-Za-z_$][\w$]*$/.test(trimmed)) names.add(trimmed);
+    }
   }
   for (const m of source.matchAll(objectRe)) {
     const objectBody = m[1] ?? "";

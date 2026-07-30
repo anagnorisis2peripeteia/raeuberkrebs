@@ -1955,6 +1955,9 @@ describe("raeuberkrebs secondary-interpreter gate (SSTI / log / CSV-formula / CR
     try {
       const r = runRedteam(dir, ["safe.js"], LOCAL);
       assert.equal(r.exploits.filter((x) => x.attackClass === "secondary-interpreter").length, 0);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "csv-injection").length, 0);
+      assert.equal(r.exploits.filter((x) => x.attackClass === "stored-taint").length, 0);
+      assert.ok(r.verdict !== "vulnerable");
       assert.ok(r.lanes.some((l) => l.attackClass === "secondary-interpreter" && l.live));
     } finally {
       rmSync(dir, { recursive: true, force: true });

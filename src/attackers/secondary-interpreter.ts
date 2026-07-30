@@ -12,6 +12,7 @@ import {
   nodeExportedNames,
   scanSinkLeads,
 } from "./attacker.js";
+import { functionUnits } from "./broken-access-control.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -73,13 +74,15 @@ function staticLeadsFromSource(source: string): StaticLead[] {
   return leads;
 }
 
-function probeTemplate(moduleRel: string, fnName: string, marker: string): string {
+function probeTemplate(moduleRel: string, fnName: string, marker: string, families: readonly string[]): string {
   const MOD = JSON.stringify("./" + moduleRel);
   const FN = JSON.stringify(fnName);
+  const familiesCode = JSON.stringify([...new Set(families)]);
   return `
 const MARKER = ${JSON.stringify(marker)};
 const modRel = ${MOD};
 const fnName = ${FN};
+const FAMILY_SET = new Set(${familiesCode});
 
 const sstiPayloads = ["{{value}}", "<%= value %>", "{{{value}}}", "{{ value }}"];
 const logPayload = "line-start\\\\n" + MARKER;
@@ -189,8 +192,11 @@ function hasCrlfHeader(v) {
 function hasFormulaCell(v) {
   for (const line of asText(v).split(/\\r?\\n/)) {
     for (const cell of line.split(",")) {
-      const c = String(cell).replace(/^\s*["']/, "").replace(/["']\s*$/, "");
-      if (/^[=+@-]/.test(c) && c.includes(MARKER)) return true;
+      const trimmed = String(cell).trimStart();
+      if (!trimmed) continue;
+      if (trimmed[0] === "'" || trimmed[0] === '"' || trimmed[0] === "\\t") continue;
+      const c = String(cell).trim();
+      if ((c.startsWith("=") || c.startsWith("+") || c.startsWith("-") || c.startsWith("@")) && c.includes(MARKER)) return true;
     }
   }
   return false;
@@ -207,45 +213,53 @@ async function tryProbe(kind, variant, args, test) {
 }
 
 try {
-  for (const p of sstiPayloads) {
-    if (await tryProbe("ssti", "template", [p, { value: MARKER }], (o) => hasMarker(o.output) || hasMarker(o.text))) {
-      throw 0;
-    }
-    if (await tryProbe("ssti", "template-ctx", [{ template: p }, { value: MARKER }], (o) => hasMarker(o.output) || hasMarker(o.text))) {
-      throw 0;
+  if (FAMILY_SET.has("ssti")) {
+    for (const p of sstiPayloads) {
+      if (await tryProbe("ssti", "template", [p, { value: MARKER }], (o) => hasMarker(o.output) || hasMarker(o.text))) {
+        throw 0;
+      }
+      if (await tryProbe("ssti", "template-ctx", [{ template: p }, { value: MARKER }], (o) => hasMarker(o.output) || hasMarker(o.text))) {
+        throw 0;
+      }
     }
   }
 
-  if (await tryProbe("log", "console", [logPayload], (o) => hasForgedLog(o))) {
-    throw 0;
+  if (FAMILY_SET.has("log")) {
+    if (await tryProbe("log", "console", [logPayload], (o) => hasForgedLog(o))) {
+      throw 0;
+    }
   }
 
   const reqLike = { url: MARKER, query: MARKER, body: { next: MARKER } };
   const withPayload = [reqLike, fakeRes, headerPayload];
 
-  for (const payload of csvPayloads) {
-    if (await tryProbe("csv", "join", [payload], (o) => hasFormulaCell(o.output) || hasFormulaCell(o.text))) {
-      throw 0;
-    }
-    if (await tryProbe("csv", "row", [[payload]], (o) => hasFormulaCell(o.output) || hasFormulaCell(o.text))) {
-      throw 0;
+  if (FAMILY_SET.has("csv")) {
+    for (const payload of csvPayloads) {
+      if (await tryProbe("csv", "join", [payload], (o) => hasFormulaCell(o.output) || hasFormulaCell(o.text))) {
+        throw 0;
+      }
+      if (await tryProbe("csv", "row", [[payload]], (o) => hasFormulaCell(o.output) || hasFormulaCell(o.text))) {
+        throw 0;
+      }
     }
   }
 
-  if (await tryProbe("header", "setHeader", [fakeRes, headerPayload], (o) => hasCrlfHeader(o))) {
-    throw 0;
-  }
-  if (await tryProbe("header", "writeHead", [fakeRes, 302, { location: headerPayload }], (o) => hasCrlfHeader(o))) {
-    throw 0;
-  }
-  if (await tryProbe("header", "set", [fakeRes, "Location", headerPayload], (o) => hasCrlfHeader(o))) {
-    throw 0;
-  }
-  if (await tryProbe("header", "header", [fakeRes, { location: headerPayload }], (o) => hasCrlfHeader(o))) {
-    throw 0;
-  }
-  if (await tryProbe("header", "req-res", withPayload, (o) => hasCrlfHeader(o))) {
-    throw 0;
+  if (FAMILY_SET.has("header")) {
+    if (await tryProbe("header", "setHeader", [fakeRes, headerPayload], (o) => hasCrlfHeader(o))) {
+      throw 0;
+    }
+    if (await tryProbe("header", "writeHead", [fakeRes, 302, { location: headerPayload }], (o) => hasCrlfHeader(o))) {
+      throw 0;
+    }
+    if (await tryProbe("header", "set", [fakeRes, "Location", headerPayload], (o) => hasCrlfHeader(o))) {
+      throw 0;
+    }
+    if (await tryProbe("header", "header", [fakeRes, { location: headerPayload }], (o) => hasCrlfHeader(o))) {
+      throw 0;
+    }
+    if (await tryProbe("header", "req-res", withPayload, (o) => hasCrlfHeader(o))) {
+      throw 0;
+    }
   }
 
   process.stdout.write("SI_SAFE");
@@ -278,21 +292,28 @@ export class SecondaryInterpreterAttacker implements Attacker {
       } catch {
         continue;
       }
-      if (!TARGETS.some((t) => t.re.test(source))) continue;
-
-      const names = nodeExportedNames(source);
-      if (names.length === 0) continue;
+      const exported = new Set(nodeExportedNames(source));
+      const candidates = functionUnits(source)
+        .filter((entry) => exported.has(entry.name))
+        .map((entry) => ({
+          name: entry.name,
+          line: entry.line,
+          families: TARGETS.filter((target) => target.re.test(entry.body)).map((target) => target.family),
+        }))
+        .filter((entry) => entry.families.length > 0);
+      if (candidates.length === 0) continue;
 
       const sinkLine = firstSinkLine(source);
       const sink = firstSinkToken(source);
 
       let fired = false;
-      for (const name of names) {
+      for (const candidate of candidates) {
+        const name = candidate.name;
         if (fired) break;
 
         const marker = freshMarker();
         const driver = `.raeuber-secondary-${marker}.mjs`;
-        sandbox.writeFile(driver, probeTemplate(file, name, marker));
+        sandbox.writeFile(driver, probeTemplate(file, name, marker, candidate.families));
         const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driver} 2>&1`, 15_000);
         const out = run.stdout + run.stderr;
         const m = out.match(/SI_FIRED (\{[^]*\})/);

@@ -10,5 +10,12 @@ const win = process.platform === "win32";
 const build = spawnSync("npx", ["tsc"], { cwd: ROOT, stdio: "inherit", shell: win });
 if (build.status !== 0) process.exit(build.status ?? 1);
 
-const test = spawnSync(process.execPath, ["--test", "test/*.test.mjs"], { cwd: ROOT, stdio: "inherit", shell: win });
+// Per-test timeout so a wedged PoC (a revshell/server that never exits, an infinite loop) fails the
+// test instead of hanging the whole suite forever. Generous — a cold Python venv build + sandboxed
+// exec is the slow case (~tens of seconds); a real hang is far past this.
+const test = spawnSync(
+  process.execPath,
+  ["--test", "--test-timeout=180000", "test/*.test.mjs"],
+  { cwd: ROOT, stdio: "inherit", shell: win },
+);
 process.exit(test.status ?? 1);

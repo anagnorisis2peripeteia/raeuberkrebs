@@ -1,9 +1,76 @@
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { cpSync, existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// --- Lifecycle safety ------------------------------------------------------------------------------
+// The runner disposes each sandbox in a `finally`, which covers the normal path. These hooks cover the
+// ABNORMAL paths, where a leaked sandbox is not just a temp dir but a running crabbox lease (a VM):
+//   - catchable exits (ctrl-C, a SIGTERM from a timeout, an uncaught throw) → dispose every live box;
+//   - uncatchable exits (SIGKILL / the OOM killer) can run no handler, so the NEXT run sweeps the
+//     stale `raeuber-*` temp copies a crashed run left behind.
+// dispose() is synchronous for both sandboxes (rmSync / spawnSync `crabbox stop`), so it completes
+// inside an `exit`/signal handler.
+const OPEN_SANDBOXES = new Set<Sandbox>();
+let cleanupHooksInstalled = false;
+let sweptStaleArtifacts = false;
+
+function trackSandbox(box: Sandbox): void {
+  OPEN_SANDBOXES.add(box);
+}
+function untrackSandbox(box: Sandbox): void {
+  OPEN_SANDBOXES.delete(box);
+}
+
+function installCleanupHooks(): void {
+  if (cleanupHooksInstalled) return;
+  cleanupHooksInstalled = true;
+  const disposeAll = (): void => {
+    for (const box of [...OPEN_SANDBOXES]) {
+      try {
+        box.dispose();
+      } catch {
+        // best effort — one failed release must not block the rest
+      }
+    }
+  };
+  // `exit` covers the normal path AND an uncaught throw (Node still emits it before crashing), so it
+  // reaps sandboxes without us installing an `uncaughtException` handler that could truncate a test
+  // runner's own error reporting. The signal handlers add the ctrl-C / SIGTERM-from-timeout paths,
+  // which otherwise terminate before `exit` runs.
+  process.once("exit", disposeAll);
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    process.once(sig, () => {
+      disposeAll();
+      process.exit(130);
+    });
+  }
+}
+
+function sweepStaleArtifacts(): void {
+  if (sweptStaleArtifacts) return;
+  sweptStaleArtifacts = true;
+  // Reap local temp copies (`raeuber-*` in tmpdir) an aborted run left behind. The one-hour age guard
+  // avoids racing a concurrent run's live copy.
+  try {
+    const base = tmpdir();
+    const cutoff = Date.now() - 60 * 60 * 1000;
+    for (const name of readdirSync(base)) {
+      if (!name.startsWith("raeuber-")) continue;
+      const p = join(base, name);
+      try {
+        if (statSync(p).mtimeMs < cutoff) rmSync(p, { recursive: true, force: true });
+      } catch {
+        // best effort per entry
+      }
+    }
+  } catch {
+    // tmpdir unreadable — skip
+  }
+}
+// ---------------------------------------------------------------------------------------------------
 
 // raeuberkrebs's own esbuild binary — used to bundle a target module + its deps into a
 // single directly-importable ESM file, so drive-and-prove works on build-toolchain repos
@@ -203,6 +270,7 @@ class LocalSandbox implements Sandbox {
 
   constructor(targetDir: string) {
     this.work = mkdtempSync(join(tmpdir(), "raeuber-"));
+    trackSandbox(this); // tracked before copyInto so a throw mid-copy still gets its temp reaped
     this.copyInto(targetDir);
   }
 
@@ -250,6 +318,7 @@ class LocalSandbox implements Sandbox {
   }
 
   dispose(): void {
+    untrackSandbox(this);
     try {
       rmSync(this.work, { recursive: true, force: true });
     } catch {
@@ -305,6 +374,9 @@ class CrabboxSandbox implements Sandbox {
     if (warm.status !== 0 || !/lease=cbx_/.test(warm.stdout + warm.stderr)) {
       throw new Error(`crabbox warmup failed (exit ${warm.status}): ${warm.stderr || warm.stdout}`);
     }
+    // The lease (a running VM) now exists — track it immediately so a failure below, or a signal, gets
+    // it released instead of leaking the VM.
+    trackSandbox(this);
 
     // 2) Resolve the SSH command we exec through (a fully-quoted `ssh … user@host` string).
     const ssh = crabbox(["ssh", "--provider", provider, "--id", this.slug], 30_000);
@@ -370,7 +442,12 @@ class CrabboxSandbox implements Sandbox {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    crabbox(["stop", "--provider", this.provider, this.slug], 60_000);
+    untrackSandbox(this);
+    try {
+      crabbox(["stop", "--provider", this.provider, this.slug], 60_000);
+    } catch {
+      // best effort — the lease reaper / crabbox's own idle-GC is the backstop
+    }
   }
 }
 
@@ -391,6 +468,8 @@ export interface SandboxOptions {
  * require true isolation should check `.isolated`.
  */
 export function openSandbox(targetDir: string, opts: SandboxOptions = {}): Sandbox {
+  installCleanupHooks(); // register abnormal-exit disposal once, on first sandbox open
+  sweepStaleArtifacts(); // reap temp copies a SIGKILL'd/OOM'd prior run left behind
   const provider = opts.crabboxProvider ?? process.env.RAEUBER_CRABBOX_PROVIDER ?? "apple";
   const image = opts.crabboxImage ?? process.env.RAEUBER_CRABBOX_IMAGE ?? "node:22-bookworm-slim";
   if (opts.prefer === "local") return new LocalSandbox(targetDir);

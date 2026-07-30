@@ -1,12 +1,5 @@
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import type { Exploit } from "../types.js";
-import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, PYTHON_SOURCE_RE } from "./attacker.js";
-import { type CoverageDiffItem, PYTHON_SANDBOX_IMAGE } from "./python-driver.js";
-import { coverageDifferentialHunt, detectorLeads } from "./command-guard-oracle.js";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
+import { type CoverageDiffItem } from "./python-driver.js";
+import { CoverageDifferentialPythonLane } from "./command-guard-oracle.js";
 
 // The sensitive-path spelling-equivalence + persistence carrier corpus (issue #92). Two related gaps
 // in a command-approval denylist:
@@ -48,23 +41,8 @@ const CORPUS: CoverageDiffItem[] = [...SPELLING, ...PERSISTENCE].map((c) => ({
  * persistence primitive (`crontab -`, `chmod +s`) — a prompt-injection backdoor with no prompt
  * (CWE-693 fail-open).
  */
-export class SensitivePathSpellingPythonAttacker implements Attacker {
-  readonly attackClass = "policy-belief-divergence" as const;
-  readonly canaryFixtureDir = resolve(HERE, "..", "..", "fixtures", "sensitive-path-spelling-python");
-  readonly sandboxImage = PYTHON_SANDBOX_IMAGE;
-
-  handles(file: string): boolean {
-    return PYTHON_SOURCE_RE.test(file);
-  }
-
-  staticLeads(source: string): StaticLead[] {
-    return detectorLeads(source);
-  }
-
-  hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
-    return coverageDifferentialHunt(targetDir, files, sandbox, {
-      corpus: CORPUS,
-      family: "sensitive-write / persistence backdoor",
-    });
+export class SensitivePathSpellingPythonAttacker extends CoverageDifferentialPythonLane {
+  constructor() {
+    super("sensitive-path-spelling-python", CORPUS, "sensitive-write / persistence backdoor");
   }
 }

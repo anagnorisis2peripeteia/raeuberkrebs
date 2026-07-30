@@ -1,12 +1,5 @@
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import type { Exploit } from "../types.js";
-import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, PYTHON_SOURCE_RE } from "./attacker.js";
-import { type CoverageDiffItem, PYTHON_SANDBOX_IMAGE } from "./python-driver.js";
-import { coverageDifferentialHunt, detectorLeads } from "./command-guard-oracle.js";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
+import { type CoverageDiffItem } from "./python-driver.js";
+import { CoverageDifferentialPythonLane } from "./command-guard-oracle.js";
 
 // The defense-evasion carrier corpus (issue #95). A command guard that gates ONE spelling of
 // "disable a security control" — `systemctl stop firewalld` — but not the direct-command siblings
@@ -43,23 +36,8 @@ const CORPUS: CoverageDiffItem[] = CARRIERS.map((c) => ({
  * / `auditctl -e 0` — the same "disable a host defense" intent via a spelling the denylist misses
  * (CWE-693 fail-open).
  */
-export class DefenseEvasionCarrierPythonAttacker implements Attacker {
-  readonly attackClass = "policy-belief-divergence" as const;
-  readonly canaryFixtureDir = resolve(HERE, "..", "..", "fixtures", "defense-evasion-carrier-python");
-  readonly sandboxImage = PYTHON_SANDBOX_IMAGE;
-
-  handles(file: string): boolean {
-    return PYTHON_SOURCE_RE.test(file);
-  }
-
-  staticLeads(source: string): StaticLead[] {
-    return detectorLeads(source);
-  }
-
-  hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
-    return coverageDifferentialHunt(targetDir, files, sandbox, {
-      corpus: CORPUS,
-      family: "defense-evasion / security-control disable",
-    });
+export class DefenseEvasionCarrierPythonAttacker extends CoverageDifferentialPythonLane {
+  constructor() {
+    super("defense-evasion-carrier-python", CORPUS, "defense-evasion / security-control disable");
   }
 }

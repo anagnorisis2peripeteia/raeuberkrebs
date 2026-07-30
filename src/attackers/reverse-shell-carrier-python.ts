@@ -1,12 +1,5 @@
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import type { Exploit } from "../types.js";
-import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, PYTHON_SOURCE_RE } from "./attacker.js";
-import { type CoverageDiffItem, PYTHON_SANDBOX_IMAGE } from "./python-driver.js";
-import { coverageDifferentialHunt, detectorLeads } from "./command-guard-oracle.js";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
+import { type CoverageDiffItem } from "./python-driver.js";
+import { CoverageDifferentialPythonLane } from "./command-guard-oracle.js";
 
 // The reverse-shell / C2 carrier corpus (issue #94). A command guard that gates download-and-execute
 // (`curl … | sh`) but not the standard reverse shells has a category coverage gap: the revshell is the
@@ -49,23 +42,8 @@ const CORPUS: CoverageDiffItem[] = CARRIERS.map((c) => ({
  * detector gates `curl | sh` but clears a `/dev/tcp` / `nc -e` / `socat EXEC` reverse shell — the same
  * RCE-egress effect via a spelling the denylist misses (CWE-693 fail-open).
  */
-export class ReverseShellCarrierPythonAttacker implements Attacker {
-  readonly attackClass = "policy-belief-divergence" as const;
-  readonly canaryFixtureDir = resolve(HERE, "..", "..", "fixtures", "reverse-shell-carrier-python");
-  readonly sandboxImage = PYTHON_SANDBOX_IMAGE;
-
-  handles(file: string): boolean {
-    return PYTHON_SOURCE_RE.test(file);
-  }
-
-  staticLeads(source: string): StaticLead[] {
-    return detectorLeads(source);
-  }
-
-  hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
-    return coverageDifferentialHunt(targetDir, files, sandbox, {
-      corpus: CORPUS,
-      family: "reverse-shell / C2 egress",
-    });
+export class ReverseShellCarrierPythonAttacker extends CoverageDifferentialPythonLane {
+  constructor() {
+    super("reverse-shell-carrier-python", CORPUS, "reverse-shell / C2 egress");
   }
 }

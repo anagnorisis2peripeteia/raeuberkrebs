@@ -1,9 +1,12 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Exploit, ExploitProof } from "../types.js";
 import { type Sandbox, ensurePythonEnv } from "../sandbox.js";
-import { type StaticLead, PYTHON_SOURCE_RE, freshMarker } from "./attacker.js";
-import { type CoverageDiffItem, coverageDifferentialDriver, shq } from "./python-driver.js";
+import { type Attacker, type StaticLead, PYTHON_SOURCE_RE, freshMarker } from "./attacker.js";
+import { type CoverageDiffItem, PYTHON_SANDBOX_IMAGE, coverageDifferentialDriver, shq } from "./python-driver.js";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 // Shared machinery for the command-guard differential lanes (the carrier-corpus / coverage-gap
 // family). Every such lane probes a target's own command-safety DETECTOR — an `is_dangerous` /
@@ -128,4 +131,35 @@ export function coverageDifferentialHunt(
     }
   }
   return exploits;
+}
+
+/**
+ * Base for the Python command-guard coverage-differential carrier lanes. Each concrete lane supplies
+ * only its fixture dir, carrier corpus, and family label; the shared boilerplate (attackClass, Python
+ * sink matching, detector static leads, and the coverage-differential hunt) lives here once.
+ */
+export abstract class CoverageDifferentialPythonLane implements Attacker {
+  readonly attackClass = "policy-belief-divergence" as const;
+  readonly sandboxImage = PYTHON_SANDBOX_IMAGE;
+  readonly canaryFixtureDir: string;
+  private readonly corpus: CoverageDiffItem[];
+  private readonly family: string;
+
+  constructor(fixtureDir: string, corpus: CoverageDiffItem[], family: string) {
+    this.canaryFixtureDir = resolve(HERE, "..", "..", "fixtures", fixtureDir);
+    this.corpus = corpus;
+    this.family = family;
+  }
+
+  handles(file: string): boolean {
+    return PYTHON_SOURCE_RE.test(file);
+  }
+
+  staticLeads(source: string): StaticLead[] {
+    return detectorLeads(source);
+  }
+
+  hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
+    return coverageDifferentialHunt(targetDir, files, sandbox, { corpus: this.corpus, family: this.family });
+  }
 }

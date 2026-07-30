@@ -1,12 +1,5 @@
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import type { Exploit } from "../types.js";
-import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, PYTHON_SOURCE_RE } from "./attacker.js";
-import { type CoverageDiffItem, PYTHON_SANDBOX_IMAGE } from "./python-driver.js";
-import { coverageDifferentialHunt, detectorLeads } from "./command-guard-oracle.js";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
+import { type CoverageDiffItem } from "./python-driver.js";
+import { CoverageDifferentialPythonLane } from "./command-guard-oracle.js";
 
 // The catastrophic-destruction carrier corpus (issue #98), HARDLINE tier. A guard that treats
 // `dd of=/dev/sd*` and `mkfs …/dev/sd*` as an unconditional catastrophe floor but enumerates it by
@@ -44,23 +37,8 @@ const CORPUS: CoverageDiffItem[] = CARRIERS.map((c) => ({
  * `wipefs -a /dev/sda` / `sgdisk --zap-all /dev/sda` / `parted rm` — the same irreversible whole-device
  * destruction via a tool the hardline floor's denylist misses (CWE-693 fail-open).
  */
-export class CatastrophicDestructionCarrierPythonAttacker implements Attacker {
-  readonly attackClass = "policy-belief-divergence" as const;
-  readonly canaryFixtureDir = resolve(HERE, "..", "..", "fixtures", "catastrophic-destruction-carrier-python");
-  readonly sandboxImage = PYTHON_SANDBOX_IMAGE;
-
-  handles(file: string): boolean {
-    return PYTHON_SOURCE_RE.test(file);
-  }
-
-  staticLeads(source: string): StaticLead[] {
-    return detectorLeads(source);
-  }
-
-  hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
-    return coverageDifferentialHunt(targetDir, files, sandbox, {
-      corpus: CORPUS,
-      family: "catastrophic whole-device destruction",
-    });
+export class CatastrophicDestructionCarrierPythonAttacker extends CoverageDifferentialPythonLane {
+  constructor() {
+    super("catastrophic-destruction-carrier-python", CORPUS, "catastrophic whole-device destruction");
   }
 }

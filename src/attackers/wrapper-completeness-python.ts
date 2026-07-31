@@ -1,12 +1,5 @@
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import type { Exploit } from "../types.js";
-import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, PYTHON_SOURCE_RE } from "./attacker.js";
-import { type CoverageDiffItem, PYTHON_SANDBOX_IMAGE } from "./python-driver.js";
-import { coverageDifferentialHunt, detectorLeads } from "./command-guard-oracle.js";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
+import { type CoverageDiffItem } from "./python-driver.js";
+import { CoverageDifferentialPythonLane } from "./command-guard-oracle.js";
 
 // The wrapper-passthrough completeness carrier corpus (issue #96). A guard that surfaces the REAL
 // command through passthrough wrappers (so `sudo rm -rf /` and `env sh -c 'curl|sh'` stay gated) is
@@ -45,23 +38,8 @@ const CORPUS: CoverageDiffItem[] = [
  * same command behind an unthreaded command-start wrapper (`timeout 5 sh -c 'curl|sh'`, `find -exec …`,
  * `nice -n 10 rm -rf /`) — a wrapper blind spot that hides the inner command (CWE-693 fail-open).
  */
-export class WrapperCompletenessPythonAttacker implements Attacker {
-  readonly attackClass = "policy-belief-divergence" as const;
-  readonly canaryFixtureDir = resolve(HERE, "..", "..", "fixtures", "wrapper-completeness-python");
-  readonly sandboxImage = PYTHON_SANDBOX_IMAGE;
-
-  handles(file: string): boolean {
-    return PYTHON_SOURCE_RE.test(file);
-  }
-
-  staticLeads(source: string): StaticLead[] {
-    return detectorLeads(source);
-  }
-
-  hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
-    return coverageDifferentialHunt(targetDir, files, sandbox, {
-      corpus: CORPUS,
-      family: "wrapper-passthrough (wrapper at the command start)",
-    });
+export class WrapperCompletenessPythonAttacker extends CoverageDifferentialPythonLane {
+  constructor() {
+    super("wrapper-completeness-python", CORPUS, "wrapper-passthrough (wrapper at the command start)");
   }
 }

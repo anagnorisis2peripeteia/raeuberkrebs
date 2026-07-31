@@ -1,12 +1,5 @@
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import type { Exploit } from "../types.js";
-import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, PYTHON_SOURCE_RE } from "./attacker.js";
-import { type CoverageDiffItem, PYTHON_SANDBOX_IMAGE } from "./python-driver.js";
-import { coverageDifferentialHunt, detectorLeads } from "./command-guard-oracle.js";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
+import { type CoverageDiffItem } from "./python-driver.js";
+import { CoverageDifferentialPythonLane } from "./command-guard-oracle.js";
 
 // The pipe-to-shell wrapper-passthrough carrier corpus (issue #100). A guard that flags "pipe
 // remote/obfuscated content to a shell" by anchoring the shell immediately after the pipe
@@ -63,23 +56,8 @@ const CORPUS: CoverageDiffItem[] = [
  * a passthrough wrapper on the RHS (`curl … | sudo bash`) — a wrapper blind spot that also lets `sudo`
  * escalate while evading (CWE-693 fail-open).
  */
-export class PipeWrapperPassthroughPythonAttacker implements Attacker {
-  readonly attackClass = "policy-belief-divergence" as const;
-  readonly canaryFixtureDir = resolve(HERE, "..", "..", "fixtures", "pipe-wrapper-passthrough-python");
-  readonly sandboxImage = PYTHON_SANDBOX_IMAGE;
-
-  handles(file: string): boolean {
-    return PYTHON_SOURCE_RE.test(file);
-  }
-
-  staticLeads(source: string): StaticLead[] {
-    return detectorLeads(source);
-  }
-
-  hunt(targetDir: string, files: string[], sandbox: Sandbox): Exploit[] {
-    return coverageDifferentialHunt(targetDir, files, sandbox, {
-      corpus: CORPUS,
-      family: "pipe-to-shell (wrapper on the pipe RHS)",
-    });
+export class PipeWrapperPassthroughPythonAttacker extends CoverageDifferentialPythonLane {
+  constructor() {
+    super("pipe-wrapper-passthrough-python", CORPUS, "pipe-to-shell (wrapper on the pipe RHS)");
   }
 }

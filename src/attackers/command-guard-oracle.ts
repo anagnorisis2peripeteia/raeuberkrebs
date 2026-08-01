@@ -56,7 +56,7 @@ export function detectorLeads(source: string): StaticLead[] {
   return leads;
 }
 
-export interface CoverageDifferentialSpec {
+interface CoverageDifferentialSpec {
   /** Curated (control, carrier) pairs of a single danger category. */
   corpus: CoverageDiffItem[];
   /** Human label for the danger family, used in the exploit summary (e.g. "reverse-shell / C2 egress"). */
@@ -71,7 +71,7 @@ export interface CoverageDifferentialSpec {
  * guard flags-then-clears. Neither command is executed — the detector is called only as a pure string
  * classifier, and the divergence between two same-category commands is the evidence.
  */
-export function coverageDifferentialHunt(
+function coverageDifferentialHunt(
   targetDir: string,
   files: string[],
   sandbox: Sandbox,

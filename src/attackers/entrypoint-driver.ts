@@ -16,7 +16,7 @@ const FIELDS = [
 
 /** Milliseconds to wait after driving, so an async/callback sink's effect (e.g. an `exec` in a
  *  callback) completes before the caller observes the marker. */
-export const SETTLE_MS = 1500;
+const SETTLE_MS = 1500;
 
 /**
  * Build a driver that drives `exportName` from `moduleRel` with `payloadExpr` across every plausible

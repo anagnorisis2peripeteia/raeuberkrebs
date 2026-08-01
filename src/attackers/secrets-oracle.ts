@@ -17,7 +17,7 @@ const SCRUB_RE = /(?:redact|scrub|sanitiz|mask|censor|obfuscat|_secret|filter_se
 const NON_SCRUB_RE = /(?:is_|has_|contains_|detect_|find_|count_)/i;
 
 /** Names of scrub/redact functions in `source` (a redaction-ish name that returns cleaned text). */
-export function scrubberFunctions(source: string): string[] {
+function scrubberFunctions(source: string): string[] {
   const names: string[] = [];
   for (const m of source.matchAll(DEF_RE)) {
     const name = m[1] ?? "";
@@ -27,7 +27,7 @@ export function scrubberFunctions(source: string): string[] {
 }
 
 /** The 1-based line of the first scrubber in `names`. */
-export function firstScrubberLine(source: string, names: Set<string>): number {
+function firstScrubberLine(source: string, names: Set<string>): number {
   const lines = source.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^def\s+([A-Za-z_]\w*)\s*\(/);

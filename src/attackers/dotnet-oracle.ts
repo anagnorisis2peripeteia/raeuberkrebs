@@ -24,8 +24,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
-import { type Attacker, type StaticLead, freshMarker, scanSinkLeads } from "./attacker.js";
-import { DOTNET_SOURCE_RE, DOTNET_ENV, dotnetTfm, dotnetDriverCsproj, csharpNamespace } from "./dotnet.js";
+import { type Attacker, type StaticLead, freshMarker } from "./attacker.js";
+import { DOTNET_ENV, dotnetTfm, dotnetDriverCsproj, csharpNamespace } from "./dotnet.js";
 
 /** A public method parsed with enough shape to both FILTER (return type, first-param type, name) and
  *  CALL it from a generated driver (qualified class, static/instance, sync/async). Regex-level, like

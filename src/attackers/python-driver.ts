@@ -90,7 +90,7 @@ def _load_target(rel):
  * Emits the exact success/failure path used across Python drivers: import the target module using
  * `_load_target`, and print the canonical `IMPORT_FAIL:` marker on failure before exiting.
  */
-export function pythonDriverImport(targetExpr: string): string {
+function pythonDriverImport(targetExpr: string): string {
   return `
 try:
   mod = _load_target(${targetExpr})
@@ -105,7 +105,7 @@ except Exception as e:
  *
  * Emits the canonical `NOT_A_FUNCTION` marker for any already-resolved callable expression.
  */
-export function pythonDriverNotAFunction(functionExpr: string): string {
+function pythonDriverNotAFunction(functionExpr: string): string {
   return `
 if not callable(${functionExpr}):
   print("NOT_A_FUNCTION")

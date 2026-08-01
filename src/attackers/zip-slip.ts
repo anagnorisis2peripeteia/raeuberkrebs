@@ -1,5 +1,4 @@
-import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Exploit } from "../types.js";
 import type { Sandbox } from "../sandbox.js";
@@ -30,11 +29,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const EXTRACT_SINK_RE =
   /\b(?:unzip\w*|untar\w*|unpack\w*|decompress\w*|extract(?:Archive|All|Entry|Entries|Tarball|To|Zip)\w*)\s*\(|\.\s*extract\s*\(|new\s+AdmZip\b|\byauzl\b|node-stream-zip|(?:path\.)?(?:join|resolve)\s*\(\s*[^,()]{1,40},\s*[A-Za-z_$][\w$]*\.(?:name|path|fileName|entryName|filename)\b/;
 
-interface Entry {
-  name: string;
-  line: number;
-  body: string;
-}
 
 /**
  * Drive the extractor with a malicious "archive" (an entry list whose path escapes via `../`) into a

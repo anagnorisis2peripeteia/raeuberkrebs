@@ -37,9 +37,22 @@ const target = (m && m[${fn}]) || (m && m.default && (m.default[${fn}] || m.defa
 if (target == null) { process.exit(0); }
 const PAYLOADS = ${JSON.stringify(payloads)};
 const FIELDS = ${JSON.stringify(FIELDS)};
-const cb = () => {};
+// Capture what each driven call PRODUCES — sync return, resolved promise, and callback args — so a
+// lane whose fire signal is a RETURNED value (path-traversal's decoy content, a sqli marker row) can
+// observe it, not just lanes whose signal is an external side effect (command-injection's marker file).
+const CAP = [];
+function observe(v) {
+  try { CAP.push(typeof v === "string" ? v : (v && v.stdout ? String(v.stdout) : JSON.stringify(v))); }
+  catch { CAP.push(String(v)); }
+  if (CAP.length > 500) CAP.shift();
+}
+const cb = (...args) => { for (const a of args) observe(a); };
 function tryCall(fn, args) {
-  try { const r = fn(...args); if (r && typeof r.then === "function") r.then(() => {}, () => {}); } catch {}
+  try {
+    const r = fn(...args);
+    if (r && typeof r.then === "function") r.then(observe, observe);
+    else observe(r);
+  } catch (e) { observe(e && e.message); }
 }
 // Drive one callable with the payload in each position: positional (with & without a callback) and as
 // each config-object field (with a callback).
@@ -70,5 +83,6 @@ function driveTarget(t, P) {
 }
 for (const P of PAYLOADS) driveTarget(target, P);
 await new Promise((r) => setTimeout(r, ${SETTLE_MS}));
+process.stdout.write("RK_CAP\\u0001" + CAP.join("\\u0001").slice(0, 20000));
 `.trim();
 }

@@ -11,6 +11,7 @@ The destination of wayfinder map [#130](https://github.com/anagnorisis2peripetei
 | prototype-pollution | **9 / 16 (56%)** | 0 | 0 | ✅ (canary robust; `no-sink` excluded) | ✅ fresh `{}` polluted | **FAIL — below 80%; remaining 7 need distinct capabilities** |
 | command-injection | 3 / 10 (30%) | — | 0 | ✅ | ✅ marker file executed | **FAIL — below 80%** |
 | path-traversal | n/a (0 fn-shaped in corpus) | **170 (100%)** | 0 | ✅ | ✅ decoy content exfiltrated | **BLOCKED on #129** (recall entirely server-shaped) |
+| redos / resource-exhaustion | **0 / 6 (0%)** | 0 | 0 | ✅ | ✅ input-caused hang | **BLOCKED on #139** (generic inputs can't trigger real regexes) |
 
 ## Notes per lane
 
@@ -19,6 +20,7 @@ The destination of wayfinder map [#130](https://github.com/anagnorisis2peripetei
   - subpath entrypoint — `101` (`require("101")` throws; the real sink is `101/set`).
   - bespoke structured input — `changeset` (patch-array `apply([{key:[…]}], obj)`), `component-flatten`, `confucious`, `cached-path-relative` (not polluted by any of the standard object/flat/dotpath/key-parts shapes).
   Tracked in the 56%→80% endgame ticket. **This surfaces a question about the #132 bar:** 80% of a "function-shaped" class assumed uniform drivability; the real ceiling with a bounded JS driver is lower until the `.ts` / subpath / structured-input capabilities land.
+- **redos / resource-exhaustion** — the export-resolution port (default-function / nested-method driving) now *reaches* the vulnerable regex fn (brace-expansion, ansi-html, color-string were all applicable+live but `fired 0`), but recall is **0/6**: the driver's generic evil inputs (`"a".repeat(≤42)+"!"`) can't trigger real ReDoS regexes, which need a **tailored** attack (format prefix + long pump + failing suffix, e.g. `"hwb("+"1".repeat(50000)+"!"`). Blocked on the regex-aware attack-string generator (**#139**) — the redos analog of "function-shaped ≠ uniformly drivable": *detectable-regex ≠ generically-triggerable*.
 - **command-injection** — ported earlier (0 → 3/10); a harvest pass against the survey's winnable list is queued.
 - **path-traversal** — every real CVE is `http.createServer` + a crafted request; the lane's contracts (canary / boundary-symlink / no-FP) all pass, but its corpus recall is *entirely* gated on the #129 HTTP-handler driver. Correctly BLOCKED, not FAILED.
 

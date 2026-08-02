@@ -80,16 +80,34 @@ const BASELINE_THRESHOLD_MS = 250;
 const BASELINE_FACTOR = 6;
 const SLOPE_MARGIN_MS = 250;
 ${nodeDriverImport(mod)}
-function pick(n){ if (m && typeof m[n]==="function") return m[n]; if (m && m.default && typeof m.default[n]==="function") return m.default[n]; return null; }
-const fn = pick(${F});
-${nodeNotAFunctionGuard("!fn")}
+// Resolve EVERY callable the regex sink could live behind — not just \`m[name]\`. Real ReDoS packages
+// export the vulnerable fn as a DEFAULT function (\`module.exports = function\`, e.g. brace-expansion),
+// as the default WITH attached props (ansi-html), or as a NESTED method (color-string's \`get.rgb\`).
+// Collect the named export, the default (and its members), the module-as-function, every own method,
+// and one level of nesting — bounded — so the sink is actually reached.
+function collectCands(){
+  const out = []; const seen = new Set();
+  const add = (f, ctx) => { if (typeof f === "function" && !seen.has(f)) { seen.add(f); out.push(ctx ? f.bind(ctx) : f); } };
+  if (m){
+    add(m[${F}], m);
+    if (m.default){ add(m.default, null); if (typeof m.default === "object") { add(m.default[${F}], m.default); for (const k of Object.keys(m.default)) add(m.default[k], m.default); } }
+    if (typeof m === "function") add(m, null);
+    if (typeof m === "object") for (const k of Object.keys(m)){
+      add(m[k], m);
+      if (m[k] && typeof m[k] === "object") for (const k2 of Object.keys(m[k])) add(m[k][k2], m[k]);
+    }
+  }
+  return out.slice(0, 24);
+}
+const CANDS = collectCands();
+if (CANDS.length === 0){ process.stdout.write("NOT_A_FUNCTION"); process.exit(0); }
 function shapes(v){ return [ [v], [{ input: v, text: v, value: v, query: v, name: v, pattern: v, content: v, url: v }], [v, v] ]; }
-async function callAll(v){ for (const a of shapes(v)){ try { await fn(...a); } catch(e){} } }
-async function sample(v){
+async function callAll(fn, v){ for (const a of shapes(v)){ try { await fn(...a); } catch(e){} } }
+async function sample(fn, v){
   const samples = [];
   for (let i = 0; i < SAMPLE_COUNT; i++) {
     const s = Date.now();
-    await callAll(v);
+    await callAll(fn, v);
     samples.push(Date.now()-s);
   }
   samples.sort((a,b)=>a-b);
@@ -102,25 +120,26 @@ function hitThreshold(base, sample) {
     (ratio >= BASELINE_FACTOR || sample >= base + SLOPE_MARGIN_MS)
   );
 }
-
-// benign baseline — 3 short values; a function that's always-slow isn't input-driven ReDoS.
-const benignSamples = [
-  await sample("a normal short value " + MARKER),
-  await sample("prefix_" + MARKER + "_ok"),
-  await sample("literal-text-without-control"),
-];
-const benignMs = Math.max(...benignSamples);
-process.stdout.write("BENIGN_OK samples=" + benignSamples.join(",") + "\\n");
-if (benignMs > BASELINE_THRESHOLD_MS * 2){ process.stdout.write("SLOW_BASELINE — not input-driven\\n"); process.exit(0); }
-// evil inputs: short single-class runs + a non-matching terminator, ascending length (fire the instant one crosses)
 const classes = ["a", "1", " ", "\\t", "a1", "aA", "!a", "-"];
 const terms = ["!", "@", "\\u0000", "X", " "];
-for (let n = 20; n <= 42; n++){
-  for (const c of classes){
-    const evil = c.repeat(Math.ceil(n / c.length)) + terms[n % terms.length];
-    process.stdout.write("TRY len=" + evil.length + "\\n");
-    const dt = await sample(evil); // a catastrophic regex either crosses threshold here or never returns (sandbox kills it)
-    if (hitThreshold(benignMs, dt)) { process.stdout.write("REDOS_FIRED len=" + evil.length + " ms=" + dt + " baseline=" + benignMs + "\\n"); process.exit(0); }
+// Drive each candidate through a benign baseline + an evil length-sweep. The vulnerable candidate either
+// crosses the threshold (measured) or never returns and is killed at the sandbox budget (hang).
+for (const fn of CANDS){
+  const benignSamples = [
+    await sample(fn, "a normal short value " + MARKER),
+    await sample(fn, "prefix_" + MARKER + "_ok"),
+    await sample(fn, "literal-text-without-control"),
+  ];
+  const benignMs = Math.max(...benignSamples);
+  process.stdout.write("BENIGN_OK samples=" + benignSamples.join(",") + "\\n");
+  if (benignMs > BASELINE_THRESHOLD_MS * 2){ process.stdout.write("SLOW_BASELINE — skip candidate\\n"); continue; }
+  for (let n = 20; n <= 42; n++){
+    for (const c of classes){
+      const evil = c.repeat(Math.ceil(n / c.length)) + terms[n % terms.length];
+      process.stdout.write("TRY len=" + evil.length + "\\n");
+      const dt = await sample(fn, evil); // catastrophic regex crosses threshold here or never returns (sandbox kills it)
+      if (hitThreshold(benignMs, dt)) { process.stdout.write("REDOS_FIRED len=" + evil.length + " ms=" + dt + " baseline=" + benignMs + "\\n"); process.exit(0); }
+    }
   }
 }
 process.stdout.write("COMPLETED no-redos\\n");
@@ -205,11 +224,13 @@ export class ResourceExhaustionAttacker implements Attacker {
       const jsonLeads = deepJsonLeads(source);
       if (regexLeads.length === 0 && jsonLeads.length === 0) continue;
 
+      // Drive a synthetic "default" when there are no named exports — the vulnerable regex fn is often a
+      // bare `module.exports = function` (e.g. brace-expansion); the driver resolves it from `m` directly.
       const names = nodeExportedNames(source);
-      if (names.length === 0) continue;
+      const driveNames = names.length > 0 ? names : ["default"];
 
       let fired = false;
-      for (const name of names) {
+      for (const name of driveNames) {
         if (fired) break;
 
         if (regexLeads.length > 0) {

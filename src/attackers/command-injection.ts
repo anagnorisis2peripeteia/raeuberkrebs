@@ -78,8 +78,11 @@ export class CommandInjectionAttacker implements Attacker {
       }
       if (!CHILD_PROCESS_RE.test(source)) continue; // not a child_process file — the `.exec(` is not a shell
       if (!SINK_RE.test(source)) continue; // no sink lead — nothing to drive
+      // Drive a synthetic "default" when there are no named exports — many real command-exec libs are a
+      // bare `module.exports = function` (e.g. local-devices, growl); the shared driver resolves the
+      // default/module-as-function from `m` regardless of the name.
       const names = nodeExportedNames(source);
-      if (names.length === 0) continue; // reachable sink but no exported entrypoint to drive
+      const driveNames = names.length > 0 ? names : ["default"];
       const sinkLine = firstSinkLine(source);
       const sink = (source.match(SINK_RE)?.[0] ?? "child_process").split("(")[0].trim();
 
@@ -87,7 +90,7 @@ export class CommandInjectionAttacker implements Attacker {
       // deps, ESM/CJS, path aliases); fall back to the raw file when bundling isn't needed.
       const importRel = bundleForImport(sandbox, file) ?? file;
       let fired = false;
-      for (const name of names) {
+      for (const name of driveNames) {
         if (fired) break;
         const marker = freshMarker();
         const mf = `.rk-cmdi-${marker}`;

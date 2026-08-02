@@ -39,8 +39,19 @@ for (const d of dirs) {
   try {
     writeFileSync(join(work, "package.json"), JSON.stringify({ name: "p3", version: "0.0.0", private: true }));
     execSync(`npm i ${dep}@${ver} --no-audit --no-fund --loglevel=error`, { cwd: work, stdio: "ignore", timeout: 120000 });
+    // An entry with no usable sink FILE (empty `sink`, or a `sink` path that isn't present in the
+    // installed package) is UNMEASURABLE — there is no specific file to point the scanner at. Record it
+    // as `no-sink` rather than running against the package DIR, where a non-matching lane would read as
+    // `lane-not-live` and be wrongly blamed as a canary/liveness failure. Keeps the recall denominator
+    // honest: `no-sink` is excluded from HIT/MISS, not counted as a dead lane.
     const sinkRel = sink ? join("node_modules", dep, String(sink).split(":")[0]) : "";
-    const target = sinkRel && existsSync(join(work, sinkRel)) ? sinkRel : `node_modules/${dep}`;
+    if (!sinkRel || !existsSync(join(work, sinkRel))) {
+      note = "no-sink";
+      results.push({ cve: meta.id, dep, ver, sink: (sink || "").split(":")[0], verdict: null, fired: null, note });
+      console.log(`${note.padEnd(14)} ${(meta.id || d).padEnd(18)} ${dep}@${ver}  (no measurable sink file)`);
+      continue; // the `finally` below removes the workdir
+    }
+    const target = sinkRel;
     let raw;
     try {
       raw = execFileSync("node", [CLI, "--dir", work, "--file", target, "--prefer", "local", "--json"],

@@ -188,7 +188,13 @@ function sandboxOptionsFor(attacker: Attacker, base: SandboxOptions): SandboxOpt
 // is broken. Retry a not-live canary before quarantining: a genuinely dead lane fails every attempt
 // (still caught, fail-closed), but a one-off timeout passes on the retry, so the gate is deterministic
 // instead of intermittently red on `lane-dead`.
-const CANARY_ATTEMPTS = 2;
+//
+// 3 (not 2): a bulk real-corpus recall run drives many targets *concurrently* (each npm-installing a
+// package), so a canary's node subprocess can lose two consecutive scheduling races to that load — one
+// spare retry is not enough headroom. A truly dead lane still fails all three (fail-closed), so the
+// only cost is a slightly slower quarantine for a genuinely broken lane. (Observed: a proto-pollution
+// canary that is live 12/12 idle intermittently quarantined under a 20-way concurrent install storm.)
+const CANARY_ATTEMPTS = 3;
 
 function proveLaneLive(
   attacker: Attacker,

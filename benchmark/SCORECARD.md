@@ -8,15 +8,17 @@ The destination of wayfinder map [#130](https://github.com/anagnorisis2peripetei
 
 | Lane | fn-shaped recall (drivable) | server-owed (#129) | neg-control FP | canary live | proven-effect oracle | **verdict** |
 |---|---|---|---|---|---|---|
-| prototype-pollution | **4 / 13 (31%)** | 0 | 0 | ⚠ 7/20 runs `lane-not-live` | ✅ fresh `{}` polluted | **FAIL — below 80%; + canary flakiness** |
+| prototype-pollution | **9 / 16 (56%)** | 0 | 0 | ✅ (canary robust; `no-sink` excluded) | ✅ fresh `{}` polluted | **FAIL — below 80%; remaining 7 need distinct capabilities** |
 | command-injection | 3 / 10 (30%) | — | 0 | ✅ | ✅ marker file executed | **FAIL — below 80%** |
 | path-traversal | n/a (0 fn-shaped in corpus) | **170 (100%)** | 0 | ✅ | ✅ decoy content exfiltrated | **BLOCKED on #129** (recall entirely server-shaped) |
 
 ## Notes per lane
 
-- **prototype-pollution** — the entrypoint-driver-style port lifted real recall from ~0 → 4/13. Two blockers remain to reach the bar, each a follow-up ticket:
-  1. **9 driven-but-MISS** vulnerable packages (e.g. `aurelia-path`, `101`, `bmoor`, `bodymen`) — the driver reaches an export but the specific call shape / subpath entrypoint isn't hit.
-  2. **7/20 `lane-not-live`** — the lane's own canary intermittently fails to fire in a cold sandbox → the lane is quarantined and can't report. A liveness/flakiness bug independent of detection.
+- **prototype-pollution** — recall lifted ~0 → **9/16 (56%)** across three commits: default-function-export driving, a sink gate keyed on the real pollution WRITE primitive (computed-member assignment `obj[key]=…`, nested forms included), and honest `no-sink` accounting. `lane-not-live` was diagnosed as a measurement artifact, not canary fragility (#136). The remaining **7 MISS each need a DISTINCT capability**, not a shape tweak — the key finding that **"function-shaped" ≠ "uniformly drivable"**:
+  - `.ts` sink not driven — `confinit`, `class-transformer` (a TypeScript-entrypoint capability, cf. #129 for HTTP).
+  - subpath entrypoint — `101` (`require("101")` throws; the real sink is `101/set`).
+  - bespoke structured input — `changeset` (patch-array `apply([{key:[…]}], obj)`), `component-flatten`, `confucious`, `cached-path-relative` (not polluted by any of the standard object/flat/dotpath/key-parts shapes).
+  Tracked in the 56%→80% endgame ticket. **This surfaces a question about the #132 bar:** 80% of a "function-shaped" class assumed uniform drivability; the real ceiling with a bounded JS driver is lower until the `.ts` / subpath / structured-input capabilities land.
 - **command-injection** — ported earlier (0 → 3/10); a harvest pass against the survey's winnable list is queued.
 - **path-traversal** — every real CVE is `http.createServer` + a crafted request; the lane's contracts (canary / boundary-symlink / no-FP) all pass, but its corpus recall is *entirely* gated on the #129 HTTP-handler driver. Correctly BLOCKED, not FAILED.
 

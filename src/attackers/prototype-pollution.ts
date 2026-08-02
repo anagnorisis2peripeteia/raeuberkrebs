@@ -31,7 +31,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // is deliberately loose: the lane's oracle is a REAL-EFFECT proof (a fresh `{}` is actually polluted),
 // so it cannot false-positive on a driven-but-safe file — a guarded merge simply never pollutes.
 const MERGE_SINK_RE =
-  /\b(?:deep(?:ly)?[_-]?(?:Merge|Assign|Extend|Set|Defaults)|merge(?:Deep|With|Options|Config|Defaults)?|extend|mixin|assign(?:Deep|In)?|setWith|setPath|updateIn|objectAssignDeep|defaultsDeep|unflatten|flatten)\s*\(|\bfor\s*\(\s*(?:const|let|var)\s+[\w$]+\s+(?:in|of)\b/;
+  /\b(?:deep(?:ly)?[_-]?(?:Merge|Assign|Extend|Set|Defaults)|merge(?:Deep|With|Options|Config|Defaults)?|extend|mixin|assign(?:Deep|In)?|setWith|setPath|updateIn|objectAssignDeep|defaultsDeep|unflatten|flatten)\s*\(|\bfor\s*\(\s*(?:const|let|var)\s+[\w$]+\s+(?:in|of)\b|[A-Za-z_$][\w$]*\s*(?:\[\s*[A-Za-z_$][\w$]*\s*\]\s*)+=[^=]/;
+// The third alternative — a computed-member assignment `obj[key] = …` (identifier key(s), not a numeric
+// index), including NESTED forms `obj[a][b] = …` — is the actual prototype-pollution WRITE primitive.
+// A path-setter like bmoor's `set()` writes `curSpace[part] = …`; bodymen's `handler()` writes
+// `handlers[type][name] = …` — neither has a `for…in`/`for…of` or a merge name, so only this signal
+// catches them. Deliberately broad — but the oracle is a real-effect proof (a fresh `{}` is actually
+// polluted), so a driven-but-safe file cannot false-positive, and raeuberkrebs drives per changed file.
 
 /**
  * Drive the entrypoint with prototype-pollution payloads, then check whether a FRESH `{}` inherited the
@@ -74,6 +80,8 @@ function driveFn(fn){
     () => fn(P_flat()), () => fn({}, P_flat()), () => fn(P_flatCtor()), () => fn({}, P_flatCtor()),
     () => fn({}, "__proto__."+MK, MK), () => fn({}, ["__proto__", MK], MK),
     () => fn({}, "constructor.prototype."+MK, MK), () => fn({}, "__proto__", { [MK]: MK }),
+    // key-parts as SEPARATE positional args: set(topKey, subKey, value) -- e.g. bodymen's handler().
+    () => fn("__proto__", MK, MK), () => fn("constructor", "prototype", MK),
   ];
   for (const a of attempts){
     clean();

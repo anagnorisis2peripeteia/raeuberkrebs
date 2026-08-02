@@ -4,6 +4,7 @@ import type { Exploit } from "../types.js";
 import { type Sandbox, bundleForImport } from "../sandbox.js";
 import { type Attacker, type StaticLead, nodeRunCommand, NODE_SOURCE_RE, freshMarker, nodeExportedNames, readHandledSources, scanSinkLeads } from "./attacker.js";
 import { driveEntrypointDriver } from "./entrypoint-driver.js";
+import { isHttpServerShape, driveHttpTraversal } from "./http-driver.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -86,6 +87,37 @@ export class PathTraversalAttacker implements Attacker {
     const payloads = traversalPayloads();
 
     for (const { file, source } of readHandledSources(targetDir, files, (f) => this.handles(f))) {
+      // HTTP-server shape (#129): the sink is reached through `req.url`, not an export — boot the module
+      // as a server and drive it with crafted traversal REQUESTS. These files usually have no exported
+      // entrypoint, so the function-driver path below would skip them (the SecBench path-traversal gap).
+      if (isHttpServerShape(source)) {
+        const marker = freshMarker();
+        const driverRel = `.raeuber-pt-http-${marker}.mjs`;
+        const serverAbs = resolve(targetDir, file);
+        sandbox.writeFile(driverRel, driveHttpTraversal(serverAbs, secret, marker.toLowerCase().replace(/_/g, "")));
+        const run = sandbox.exec(`${nodeRunCommand(targetDir)} ${driverRel} 2>&1`, 30_000);
+        const out = run.stdout + run.stderr;
+        if (out.includes("RK_HTTP_FIRED")) {
+          const firedPath = out.match(/RK_HTTP_FIRED path=(\S+)/)?.[1] ?? "/../<decoy>";
+          exploits.push({
+            attackClass: "path-traversal",
+            proof: "secret-exfiltrated",
+            file,
+            line: firstSinkLine(source),
+            sink: "http-request-handler",
+            summary:
+              `The module boots an HTTP server whose handler builds a filesystem path from the request ` +
+              `(\`req.url\`) with no containment; a crafted request escaped the served directory and read a ` +
+              `decoy planted outside it — a single-request path traversal (CWE-22).`,
+            payload: `GET ${firedPath}  (booted the module as a server; port auto-discovered)`,
+            evidence:
+              `booted \`${file}\` as a server, discovered its listen port, and a traversal request read the ` +
+              `planted outside-decoy (content marker ${secret}) back in the response body:\n` +
+              out.slice(0, 500),
+          });
+        }
+        continue; // an HTTP-server file is driven by request, not by import
+      }
       if (!SINK_RE.test(source)) continue;
       const names = nodeExportedNames(source);
       if (names.length === 0) continue;

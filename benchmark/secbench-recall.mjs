@@ -8,9 +8,13 @@ import { execFileSync, execSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const SECBENCH = "/private/tmp/claude-501/-Users-cameronbeeley/0f82624d-6358-4fa4-9dde-72c349723a04/scratchpad/SecBench.js";
-const CLI = "/Users/cameronbeeley/raeuberkrebs/dist/cli.js";
+// SecBench.js corpus location — override with SECBENCH_DIR so the harness runs off-box (e.g. on a
+// remote worker with the corpus on a different drive) without editing the path.
+const SECBENCH = process.env.SECBENCH_DIR || "/private/tmp/claude-501/-Users-cameronbeeley/0f82624d-6358-4fa4-9dde-72c349723a04/scratchpad/SecBench.js";
+// Resolve the built CLI relative to this harness file so it works from any checkout / drive.
+const CLI = process.env.RK_CLI || fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 // SecBench class dir -> the raeuberkrebs lane(s) that should catch it.
 const CLASS_LANES = {
   "command-injection": ["command-injection"],

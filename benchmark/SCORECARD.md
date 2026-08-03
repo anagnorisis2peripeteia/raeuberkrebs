@@ -11,7 +11,7 @@ The destination of wayfinder map [#130](https://github.com/anagnorisis2peripetei
 | prototype-pollution | **9 / 16 (56%)** | 0 | 0 | ✅ (canary robust; `no-sink` excluded) | ✅ fresh `{}` polluted | **FAIL — below 80%; remaining 7 need distinct capabilities** |
 | command-injection | **10 / 18 (56%)** | (server-shaped remainder → #129) | 0 | ✅ | ✅ marker file executed | **FAIL — below 80%; ~2× via default-fn driving** |
 | path-traversal | **8 / 13 (62%)** via #129 HTTP driver | (handler-submodule tail) | 0 | ✅ | ✅ decoy content exfiltrated | **FAIL — below 80%, but 0 → 62% (was BLOCKED)** |
-| redos / resource-exhaustion | **0 / 6 (0%)** | 0 | 0 | ✅ | ✅ input-caused hang | **BLOCKED on #139** (generic inputs can't trigger real regexes) |
+| redos / resource-exhaustion | **0 / 6 (0%)** | 0 | 0 | ✅ | ✅ input-caused hang | **BLOCKED on #141** (#139 tailored generator landed; real recall now gated on broader ReDoS *detection*) |
 
 ## Notes per lane
 
